@@ -24,6 +24,7 @@ import ConnectionBadge, { type QualityLevel } from '../components/ConnectionBadg
 import SessionTimer       from '../components/SessionTimer'
 import AudioOnlyView      from '../components/AudioOnlyView'
 import SummaryBanner      from '../components/SummaryBanner'
+import HelpButton         from '../components/HelpButton'
 import AnalysisDashboard  from './AnalysisDashboard'
 
 const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL as string
@@ -232,12 +233,13 @@ function ParentRoom({
                 <SessionTimer />
               )}
               <button
-                className="end-circle-btn"
+                className="end-circle-btn end-circle-btn--labeled"
                 onClick={(e) => { e.stopPropagation(); handleEnd() }}
-                title="Beenden"
+                title="Session beenden"
                 aria-label="Session beenden"
               >
-                ✕
+                <span className="end-circle-label">Session verlassen</span>
+                <span className="end-circle-icon">✕</span>
               </button>
             </div>
           </div>
@@ -263,6 +265,7 @@ function ParentRoom({
         </div>
 
         {summary && <SummaryBanner summary={summary} onDismiss={clearSummary} />}
+        <HelpButton screen="monitor" />
 
         {monitorState === 'degraded' && (
           <div className="degraded-banner">

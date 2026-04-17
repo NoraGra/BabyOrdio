@@ -1,5 +1,6 @@
 import BabyIcon from '../components/icons/BabyIcon'
 import ParentIcon from '../components/icons/ParentIcon'
+import HelpButton from '../components/HelpButton'
 
 interface Props {
   onSelectBaby: (code: string) => void
@@ -25,27 +26,39 @@ export default function Home({ onSelectBaby, onSelectParent, onViewAnalysis }: P
 
       {/* Role cards */}
       <div className="home-cards">
-        <button
-          className="role-card"
-          onClick={() => onSelectBaby(generateCode())}
-        >
-          <div className="role-card-art">
-            <BabyIcon size={76} />
-          </div>
-          <span className="role-card-name">Baby-Gerät</span>
-          <span className="role-card-desc">Kamera &amp; Ton übertragen</span>
-        </button>
 
-        <button
-          className="role-card"
-          onClick={onSelectParent}
-        >
-          <div className="role-card-art">
-            <ParentIcon size={76} />
-          </div>
-          <span className="role-card-name">Eltern-Gerät</span>
-          <span className="role-card-desc">Baby beobachten &amp; hören</span>
-        </button>
+        {/* Step 1 — Baby device */}
+        <div className="role-card-wrapper">
+          <span className="role-card-step">1. Richte zuerst dieses ein:</span>
+          <button
+            className="role-card"
+            onClick={() => onSelectBaby(generateCode())}
+          >
+            <div className="role-card-art">
+              <BabyIcon size={76} />
+            </div>
+            <span className="role-card-name">Baby-Gerät</span>
+            <span className="role-card-desc">Kamera &amp; Ton übertragen</span>
+          </button>
+        </div>
+
+        {/* Step 2 — Parent device (dimmed, not clickable) */}
+        <div className="role-card-wrapper role-card-wrapper--disabled">
+          <span className="role-card-step">2. Wenn du das Baby-Gerät eingerichtet hast, kannst du dieses einrichten:</span>
+          <button
+            className="role-card"
+            onClick={onSelectParent}
+            tabIndex={-1}
+            aria-disabled="true"
+          >
+            <div className="role-card-art">
+              <ParentIcon size={76} />
+            </div>
+            <span className="role-card-name">Eltern-Gerät</span>
+            <span className="role-card-desc">Baby beobachten &amp; hören</span>
+          </button>
+        </div>
+
       </div>
 
       {/* Last session shortcut */}
@@ -54,6 +67,8 @@ export default function Home({ onSelectBaby, onSelectParent, onViewAnalysis }: P
           📊 Letzte Session ansehen
         </button>
       )}
+
+      <HelpButton screen="home" large />
     </div>
   )
 }

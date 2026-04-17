@@ -3,6 +3,7 @@ import type { SessionData, SessionStats } from '../hooks/useSessionRecorder'
 import ConnectionBadge from '../components/ConnectionBadge'
 import type { QualityLevel } from '../components/ConnectionBadge'
 import { CryIcon, MoveIcon, RestIcon, SleepQualityIcon, AudioIcon } from '../components/icons/DashboardIcon'
+import HelpButton from '../components/HelpButton'
 
 export type LiveStatus = 'full' | 'partial' | 'offline'
 
@@ -48,7 +49,7 @@ function IntensityDots({ level, max = 10 }: { level: number; max?: number }) {
 
 // ── Status banner logic ─────────────────────────────────────────────────────
 
-type StatusColor = 'green' | 'yellow' | 'orange' | 'red' | 'gray'
+type StatusColor = 'green' | 'orange' | 'red' | 'gray'
 interface StatusInfo { headline: string; subtitle: string; color: StatusColor }
 
 function computeLiveStatus(
@@ -57,66 +58,60 @@ function computeLiveStatus(
   detectors?: LiveDetectors,
   liveStatus?: LiveStatus,
 ): StatusInfo {
-  const nowMs       = Date.now() - session.startTime.getTime()
-  const openCry     = session.cryEvents.find(e => e.endMs === null)
-  const isCrying    = detectors?.isCrying || !!openCry
-  const isMoving    = detectors?.isMoving ?? false
-  const intensity   = detectors?.moveIntensity ?? 0
+  const nowMs    = Date.now() - session.startTime.getTime()
+  const openCry  = session.cryEvents.find(e => e.endMs === null)
+  const isCrying = detectors?.isCrying || !!openCry
+  const isMoving = detectors?.isMoving ?? false
+  const intensity = detectors?.moveIntensity ?? 0
 
   if (liveStatus === 'offline') {
-    return { headline: 'Verbindung getrennt', subtitle: 'Status kann nicht beurteilt werden.', color: 'gray' }
+    return { headline: 'Verbindung unterbrochen', subtitle: 'Status kann nicht beurteilt werden.', color: 'gray' }
   }
 
   if (isCrying) {
     const cryCount = session.cryEvents.length
     const dur      = openCry ? Math.round((nowMs - openCry.startMs) / 1000) : 0
     return {
-      headline: 'Weint gerade',
+      headline: 'Weint',
       subtitle: `${cryCount > 1 ? `${cryCount}. Phase · ` : ''}läuft seit ${fmtDur(dur)}`,
       color:    'red',
     }
   }
 
-  if (isMoving && intensity >= 7) {
+  if (isMoving) {
+    const strong = intensity >= 7
     return {
-      headline: 'Sehr unruhig',
-      subtitle: `Starke Bewegungen · Intensität ${intensity}/10`,
+      headline: strong ? 'Ist sehr unruhig' : 'Bewegt sich',
+      subtitle:  `${strong ? 'Starke' : 'Leichte'} Bewegungen · Intensität ${intensity}/10`,
       color:    'orange',
     }
   }
 
-  if (isMoving) {
-    return {
-      headline: 'Bewegt sich',
-      subtitle: `Leichte Bewegungen · Intensität ${intensity}/10`,
-      color:    'yellow',
-    }
-  }
-
-  // Check last activity
-  const lastCryEnd  = session.cryEvents.length > 0
+  // Quiet — check how long
+  const lastCryEnd   = session.cryEvents.length > 0
     ? Math.max(...session.cryEvents.map(e => e.endMs ?? nowMs)) : 0
-  const lastMoveMs  = session.moveEvents.length > 0
+  const lastMoveMs   = session.moveEvents.length > 0
     ? Math.max(...session.moveEvents.map(e => e.timeMs)) : 0
   const lastActivity = Math.max(lastCryEnd, lastMoveMs)
-  const quietSec     = lastActivity > 0 ? Math.round((nowMs - lastActivity) / 1000) : Math.round(nowMs / 1000)
+  const quietSec     = lastActivity > 0
+    ? Math.round((nowMs - lastActivity) / 1000)
+    : Math.round(nowMs / 1000)
 
+  // Green only after ≥ 3 min quiet
   if (quietSec < 30) {
-    return { headline: 'Gerade ruhig geworden', subtitle: `Aktiv war vor ${quietSec} Sek.`, color: 'yellow' }
+    return { headline: 'Ist gerade ruhig geworden', subtitle: `Aktiv vor ${quietSec} Sek.`, color: 'orange' }
   }
-  if (quietSec < 5 * 60) {
-    const totalCries = stats.cryCount
-    const sub = totalCries > 0
-      ? `Ruhig seit ${fmtDur(quietSec)} · ${totalCries}× geweint bisher`
+  if (quietSec < 3 * 60) {
+    const sub = stats.cryCount > 0
+      ? `Ruhig seit ${fmtDur(quietSec)} · ${stats.cryCount}× geweint bisher`
       : `Ruhig seit ${fmtDur(quietSec)}`
-    return { headline: 'Ruhig', subtitle: sub, color: 'green' }
+    return { headline: 'Ist ruhig', subtitle: sub, color: 'orange' }
   }
   if (quietSec < 15 * 60) {
-    return {
-      headline: 'Schläft wahrscheinlich',
-      subtitle: `Keine Aktivität seit ${fmtDur(quietSec)}`,
-      color: 'green',
-    }
+    return { headline: 'Ist ruhig', subtitle: `Keine Aktivität seit ${fmtDur(quietSec)}`, color: 'green' }
+  }
+  if (quietSec < 30 * 60) {
+    return { headline: 'Schläft wahrscheinlich', subtitle: `Keine Aktivität seit ${fmtDur(quietSec)}`, color: 'green' }
   }
   return {
     headline: 'Schläft tief',
@@ -130,59 +125,58 @@ function computePostSessionStatus(session: SessionData, stats: SessionStats): St
 
   if (cryCount === 0 && moveCount < 5) {
     return {
-      headline: 'Hat durchgeschlafen 💤',
+      headline: 'Hat durchgeschlafen',
       subtitle: `${fmtDur(durationSec)} ohne Weinen · ${moveCount} leichte Bewegungen`,
       color: 'green',
     }
   }
   if (cryCount === 0) {
     return {
-      headline: 'Ruhige Session',
+      headline: 'Hat gut geschlafen',
       subtitle: `Kein Weinen · ${moveCount} Bewegungen insgesamt`,
       color: 'green',
     }
   }
   if (cryCount === 1 && cryTotalSec < 45) {
     return {
-      headline: 'Fast durchgeschlafen',
+      headline: 'Hat fast durchgeschlafen',
       subtitle: `1× kurz geweint (${fmtDur(cryTotalSec)}) · danach sofort beruhigt`,
-      color: 'yellow',
+      color: 'green',
     }
   }
   if (cryCount === 1) {
     return {
-      headline: 'Einmal geweint',
+      headline: 'Hat einmal geweint',
       subtitle: `1 Weinphase (${fmtDur(cryTotalSec)}) · ${moveCount} Bewegungen`,
-      color: 'yellow',
+      color: 'orange',
     }
   }
   if (cryCount <= 3 && cryTotalSec < 120) {
     return {
-      headline: 'Leicht unruhig',
+      headline: 'Hat leicht unruhig geschlafen',
       subtitle: `${cryCount}× geweint · gesamt ${fmtDur(cryTotalSec)} · ${moveCount} Bewegungen`,
       color: 'orange',
     }
   }
   if (cryCount <= 5) {
     return {
-      headline: 'Unruhige Session',
+      headline: 'Hat unruhig geschlafen',
       subtitle: `${cryCount}× geweint · gesamt ${fmtDur(cryTotalSec)} · ${moveCount} Bewegungen`,
       color: 'orange',
     }
   }
   return {
-    headline: 'Schwierige Nacht',
+    headline: 'Hat viel geweint',
     subtitle: `${cryCount}× geweint · gesamt ${fmtDur(cryTotalSec)} · häufiges Aufwachen`,
     color: 'red',
   }
 }
 
-const STATUS_COLORS: Record<StatusColor, { bg: string; text: string; border: string }> = {
-  green:  { bg: '#f0fdf4', text: '#15803d', border: '#bbf7d0' },
-  yellow: { bg: '#fefce8', text: '#854d0e', border: '#fef08a' },
-  orange: { bg: '#fff7ed', text: '#c2410c', border: '#fed7aa' },
-  red:    { bg: '#fef2f2', text: '#b91c1c', border: '#fecaca' },
-  gray:   { bg: '#f9fafb', text: '#6b7280', border: '#e5e7eb' },
+const STATUS_COLORS: Record<StatusColor, { bg: string; border: string }> = {
+  green:  { bg: '#f0fdf4', border: '#bbf7d0' },
+  orange: { bg: '#fff7ed', border: '#fed7aa' },
+  red:    { bg: '#fef2f2', border: '#fecaca' },
+  gray:   { bg: '#f9fafb', border: '#e5e7eb' },
 }
 
 // ── Timeline ────────────────────────────────────────────────────────────────
@@ -220,7 +214,7 @@ const WINDOW_LABELS: Record<WindowMinutes, string> = {
   5:    '5 Min.',
   15:   '15 Min.',
   30:   '30 Min.',
-  all:  'Seit Beginn',
+  all:  'Gesamt',
 }
 
 const WINDOW_OPTIONS: WindowMinutes[] = [5, 15, 30, 'all']
@@ -323,13 +317,17 @@ export default function AnalysisDashboard({
 
   return (
     <div className="screen analysis-screen">
-      {/* Header: 3 columns */}
+      <HelpButton screen="dashboard" />
+      {/* Header: code left · empty center · close right */}
       <div className="analysis-header">
-        <button className="analysis-nav-back" onClick={onBack}>← Zurück</button>
         <span className="header-session-code">
           Session Code: {session.sessionCode.slice(0,3)} {session.sessionCode.slice(3)}
         </span>
-        <button className="overlay-close-x" onClick={onBack} aria-label="Schließen">✕</button>
+        <span />
+        <button className="overlay-close-x overlay-close-x--labeled" onClick={onBack} aria-label="Schließen">
+          <span className="overlay-close-label">zurück zur Übertragung</span>
+          <span className="overlay-close-icon">✕</span>
+        </button>
       </div>
 
       {/* Video-off banner */}
@@ -351,20 +349,114 @@ export default function AnalysisDashboard({
         <div
           className="status-banner"
           style={{
-            background: STATUS_COLORS[statusInfo.color].bg,
+            background:  STATUS_COLORS[statusInfo.color].bg,
             borderColor: STATUS_COLORS[statusInfo.color].border,
           }}
         >
-          <p className="status-banner-headline" style={{ color: STATUS_COLORS[statusInfo.color].text }}>
-            {statusInfo.headline}
+          <p className="status-banner-label">
+            {isLive ? 'Dein Kind gerade:' : 'Dein Kind:'}
           </p>
+          <p className="status-banner-headline">{statusInfo.headline}</p>
           <p className="status-banner-subtitle">{statusInfo.subtitle}</p>
         </div>
 
-        {/* ── Übersicht ────────────────────────────────────────────── */}
+        {/* ── KI-Analyse ───────────────────────────────────────────── */}
         <div className="o-card">
           <div className="o-card-header">
-            <span className="o-card-title">Übersicht</span>
+            <span className="o-card-title">KI-Analyse</span>
+          </div>
+
+          {/* Time window chips with prefix label */}
+          <div className="window-chips-row">
+            <span className="window-chips-label">Zeige Daten der letzten</span>
+            <div className="window-chips">
+              {WINDOW_OPTIONS.map(w => (
+                <button
+                  key={String(w)}
+                  className={`window-chip ${aiWindow === w ? 'window-chip--active' : ''}`}
+                  onClick={() => {
+                    setAiWindow(w)
+                    if (aiSummary) runAiAnalysis(w)
+                  }}
+                >
+                  {WINDOW_LABELS[w]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {aiLoading ? (
+            <div className="ai-summary-loading">
+              <div className="spinner" style={{ width: 20, height: 20, borderWidth: 2 }} />
+              Analyse läuft…
+            </div>
+          ) : aiSummary ? (
+            <div>
+              <p className="ai-summary-text">{aiSummary}</p>
+              <button className="ai-refresh-btn" onClick={() => runAiAnalysis(aiWindow)}>
+                ↻ Erneut analysieren
+              </button>
+            </div>
+          ) : (
+            <button className="ai-analyze-btn" onClick={() => runAiAnalysis(aiWindow)}>
+              ✨ Jetzt analysieren
+            </button>
+          )}
+        </div>
+
+        {/* ── Stats ────────────────────────────────────────────────── */}
+        <div className="o-card">
+          <div className="o-card-header">
+            <span className="o-card-title">Statistiken</span>
+          </div>
+          <div className="stats-grid stats-grid--3">
+
+            {/* Card 1: Weinen */}
+            <div className="stat-card">
+              <span className="stat-card-icon"><CryIcon size={24} /></span>
+              <span className="stat-card-value">
+                {stats.cryCount > 0
+                  ? <>{stats.cryCount}× <span className="stat-value-small">· {fmtDur(stats.cryTotalSec)}</span></>
+                  : '–'
+                }
+              </span>
+              <span className="stat-card-label">Weinphasen</span>
+              {stats.peakCryLevel > 0 && (
+                <span className="stat-card-sub">
+                  <IntensityDots level={stats.peakCryLevel} />
+                </span>
+              )}
+            </div>
+
+            {/* Card 2: Schlafqualität */}
+            <div className="stat-card">
+              <span className="stat-card-icon">
+                <SleepQualityIcon size={24} level={stats.sleepQuality} />
+              </span>
+              <span className="stat-card-value" style={{
+                fontSize: '1rem',
+                color: stats.sleepQuality === 'deep' ? '#16a34a' : stats.sleepQuality === 'light' ? '#ca8a04' : '#ea580c'
+              }}>
+                {stats.sleepQuality === 'deep' ? 'Tief' : stats.sleepQuality === 'light' ? 'Leicht' : 'Unruhig'}
+              </span>
+              <span className="stat-card-label">Schlafqualität</span>
+              <span className="stat-card-sub">{stats.moveCount} Bewegungen</span>
+            </div>
+
+            {/* Card 3: Ruhezeit % */}
+            <div className="stat-card">
+              <span className="stat-card-icon"><RestIcon size={24} /></span>
+              <span className="stat-card-value">{stats.quietPct}%</span>
+              <span className="stat-card-label">Ruhezeit</span>
+            </div>
+
+          </div>
+        </div>
+
+        {/* ── Übersicht Session + Verbindung ───────────────────────── */}
+        <div className="o-card">
+          <div className="o-card-header">
+            <span className="o-card-title">Übersicht Session + Verbindung</span>
           </div>
           <div className="session-meta">
             <div className="session-meta-item">
@@ -428,102 +520,6 @@ export default function AnalysisDashboard({
             </>
           ) : (
             <p style={{ color: 'var(--text-muted-l)', fontSize: '0.85rem' }}>Noch keine Daten.</p>
-          )}
-        </div>
-
-        {/* ── Stats ────────────────────────────────────────────────── */}
-        <div className="o-card">
-          <div className="o-card-header">
-            <span className="o-card-title">Statistiken</span>
-          </div>
-          <div className="stats-grid stats-grid--3">
-
-            {/* Card 1: Weinen — count + duration combined, intensity dots below */}
-            <div className="stat-card">
-              <span className="stat-card-icon"><CryIcon size={24} /></span>
-              <span className="stat-card-value">
-                {stats.cryCount > 0
-                  ? <>{stats.cryCount}× <span className="stat-value-small">· {fmtDur(stats.cryTotalSec)}</span></>
-                  : '–'
-                }
-              </span>
-              <span className="stat-card-label">Weinphasen</span>
-              {stats.peakCryLevel > 0 && (
-                <span className="stat-card-sub">
-                  <IntensityDots level={stats.peakCryLevel} />
-                </span>
-              )}
-            </div>
-
-            {/* Card 2: Schlafqualität — qualitative, move count as sub */}
-            <div className="stat-card">
-              <span className="stat-card-icon">
-                <SleepQualityIcon size={24} level={stats.sleepQuality} />
-              </span>
-              <span className="stat-card-value" style={{
-                fontSize: '1rem',
-                color: stats.sleepQuality === 'deep' ? '#16a34a' : stats.sleepQuality === 'light' ? '#ca8a04' : '#ea580c'
-              }}>
-                {stats.sleepQuality === 'deep' ? 'Tief' : stats.sleepQuality === 'light' ? 'Leicht' : 'Unruhig'}
-              </span>
-              <span className="stat-card-label">Schlafqualität</span>
-              <span className="stat-card-sub">{stats.moveCount} Bewegungen</span>
-            </div>
-
-            {/* Card 3: Ruhezeit % */}
-            <div className="stat-card">
-              <span className="stat-card-icon"><RestIcon size={24} /></span>
-              <span className="stat-card-value">{stats.quietPct}%</span>
-              <span className="stat-card-label">Ruhezeit</span>
-            </div>
-
-          </div>
-        </div>
-
-        {/* ── KI-Analyse ───────────────────────────────────────────── */}
-        <div className="o-card">
-          <div className="o-card-header">
-            <span className="o-card-title">KI-Analyse</span>
-            <span className="ai-powered-tag">✨ Claude AI</span>
-          </div>
-
-          {/* Time window chips */}
-          <div className="window-chips">
-            {WINDOW_OPTIONS.map(w => (
-              <button
-                key={String(w)}
-                className={`window-chip ${aiWindow === w ? 'window-chip--active' : ''}`}
-                onClick={() => {
-                  setAiWindow(w)
-                  if (aiSummary) runAiAnalysis(w)
-                }}
-              >
-                {WINDOW_LABELS[w]}
-              </button>
-            ))}
-          </div>
-
-          {aiLoading ? (
-            <div className="ai-summary-loading">
-              <div className="spinner" style={{ width: 20, height: 20, borderWidth: 2 }} />
-              Analyse läuft…
-            </div>
-          ) : aiSummary ? (
-            <div>
-              <p className="ai-summary-text">{aiSummary}</p>
-              <button className="ai-refresh-btn" onClick={() => runAiAnalysis(aiWindow)}>
-                ↻ {isLive ? 'Jetzt neu analysieren' : 'Erneut analysieren'}
-              </button>
-            </div>
-          ) : (
-            <div className="ai-request-block">
-              <p className="ai-request-hint">
-                Claude analysiert {aiWindow === 'all' ? 'die gesamte Session' : `die letzten ${WINDOW_LABELS[aiWindow]}`} und gibt dir eine verständliche Einschätzung.
-              </p>
-              <button className="ai-analyze-btn" onClick={() => runAiAnalysis(aiWindow)}>
-                ✨ Jetzt analysieren
-              </button>
-            </div>
           )}
         </div>
 

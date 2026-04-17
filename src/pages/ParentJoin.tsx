@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import HelpButton from '../components/HelpButton'
 
 interface Props {
   onJoin: (code: string) => void
@@ -20,9 +21,12 @@ export default function ParentJoin({ onJoin, onBack }: Props) {
 
   return (
     <div className="screen join-screen">
-      <button className="back-button" onClick={onBack}>
-        ← Zurück zur Auswahl
-      </button>
+      <div className="join-top-bar">
+        <button className="overlay-close-x overlay-close-x--labeled" onClick={onBack} aria-label="Zurück zur Auswahl">
+          <span className="overlay-close-label">zurück zur Auswahl</span>
+          <span className="overlay-close-icon">✕</span>
+        </button>
+      </div>
 
       <div className="join-content">
         <h2 className="join-title">Verbindungscode eingeben</h2>
@@ -52,6 +56,8 @@ export default function ParentJoin({ onJoin, onBack }: Props) {
           </button>
         </form>
       </div>
+
+      <HelpButton screen="join" />
     </div>
   )
 }

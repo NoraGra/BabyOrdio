@@ -201,12 +201,36 @@ h1, h2, h3, .headline {
   display: flex;
   gap: 16px;
   width: 100%;
+  align-items: flex-start;
   max-width: 360px;
   justify-content: center;
 }
 
-.role-card {
+/* Wrapper: step label + card */
+.role-card-wrapper {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.role-card-step {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+  line-height: 1.4;
+  text-align: center;
+  padding: 0 4px;
+}
+
+/* Disabled wrapper: dims the card and blocks interaction */
+.role-card-wrapper--disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.role-card {
+  width: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -293,12 +317,12 @@ h1, h2, h3, .headline {
   color: var(--text-l);
 }
 
-/* On join screen the back-button sits at the top — make it big & German */
-.join-screen .back-button {
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--ordio);
-  padding: 20px;
+/* Join screen top bar — X button right-aligned */
+.join-top-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 16px 20px 0;
+  width: 100%;
 }
 
 .join-content {
@@ -660,19 +684,32 @@ h1, h2, h3, .headline {
 }
 .end-circle-btn:active { opacity: 0.7; }
 
-/* Flip camera button — white pill */
+/* Baby top-left column: badge + flip button */
+.baby-top-left {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* Flip camera button — blue pill, white icon + text */
 .flip-camera-btn {
-  background: #ffffff;
+  background: var(--ordio);
   border: none;
   border-radius: 100px;
-  color: #111827;
-  font-size: 1rem;
-  padding: 8px 14px;
+  color: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 7px 12px;
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   transition: opacity 0.15s;
   line-height: 1;
+  font-family: 'Inter', sans-serif;
 }
-.flip-camera-btn:active { opacity: 0.7; }
+.flip-camera-btn:active  { opacity: 0.8; }
 .flip-camera-btn:disabled { opacity: 0.4; cursor: default; }
 
 /* (parent-footer removed — indicators now live in parent-bottom-left) */
@@ -839,9 +876,10 @@ h1, h2, h3, .headline {
 
 .analysis-header {
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
-  padding: 16px 20px 0;
+  gap: 8px;
+  padding: 12px 16px;
   background: var(--surface-l);
   border-bottom: 1px solid var(--border-l);
   position: sticky;
@@ -875,24 +913,156 @@ h1, h2, h3, .headline {
   white-space: nowrap;
 }
 
-/* ── Overlay X close button ─────────────────────────────────────────── */
+/* ── Help button — fixed bottom-right, white transparent circle ─────── */
+.help-btn {
+  position: fixed;
+  bottom: 24px;
+  right: 20px;
+  z-index: 200;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1.5px solid rgba(255, 255, 255, 0.4);
+  color: var(--ordio);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, transform 0.15s;
+  padding: 0;
+}
+.help-btn svg { width: 18px; height: 18px; }
+.help-btn:active { background: rgba(255,255,255,0.35); transform: scale(0.94); }
+
+/* Larger variant for home screen */
+.help-btn--large {
+  width: 52px;
+  height: 52px;
+  background: rgba(255, 255, 255, 0.28);
+  border-color: rgba(255, 255, 255, 0.5);
+}
+.help-btn--large svg { width: 24px; height: 24px; }
+
+/* ── Help sheet — bottom modal ───────────────────────────────────────── */
+.help-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: flex-end;
+  animation: fade-in 0.18s ease;
+}
+
+.help-sheet {
+  width: 100%;
+  max-height: 75vh;
+  background: var(--surface-l, #ffffff);
+  border-radius: 20px 20px 0 0;
+  padding: 0 0 max(24px, env(safe-area-inset-bottom));
+  overflow-y: auto;
+  animation: slide-up 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+.help-handle {
+  width: 36px;
+  height: 4px;
+  background: #d1d5db;
+  border-radius: 2px;
+  margin: 12px auto 4px;
+}
+
+.help-sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px 16px;
+  border-bottom: 1px solid var(--border-l, #e5e7eb);
+}
+
+.help-sheet-title {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-l, #111827);
+}
+
+.help-sheet-close {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: none;
+  background: #f3f4f6;
+  color: #6b7280;
+  font-size: 0.9rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.help-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.help-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-l, #e5e7eb);
+}
+.help-item:last-child { border-bottom: none; }
+
+.help-item-icon {
+  font-size: 1.3rem;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.help-item-text { flex: 1; }
+
+.help-item-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text-l, #111827);
+  margin-bottom: 3px;
+}
+
+.help-item-body {
+  font-size: 0.82rem;
+  color: var(--text-muted-l, #6b7280);
+  line-height: 1.5;
+}
+
+@keyframes fade-in  { from { opacity: 0 } to { opacity: 1 } }
+@keyframes slide-up { from { transform: translateY(100%) } to { transform: translateY(0) } }
+
+/* On light screens the ? icon needs ordio blue, on dark screens too (it works either way) */
+
+/* ── Overlay X close button — blue circle ───────────────────────────── */
 .overlay-close-x {
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  background: transparent;
+  background: var(--ordio);
   border: none;
   font-size: 1.1rem;
   font-weight: 700;
-  color: #374151;
+  color: #ffffff;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: background 0.15s;
+  transition: opacity 0.15s;
 }
-.overlay-close-x:active { background: rgba(0,0,0,0.06); }
+.overlay-close-x:active { opacity: 0.8; }
 
 /* ── Video-off banner (top of dashboard when degraded) ──────────────── */
 .video-off-banner {
@@ -920,9 +1090,63 @@ h1, h2, h3, .headline {
   white-space: nowrap;
 }
 
-/* X aligns to the right of its grid cell */
-.analysis-header .overlay-close-x {
-  justify-self: end;
+/* Session code left-aligned in header */
+.analysis-header .header-session-code {
+  justify-self: start;
+  text-align: left;
+}
+
+/* Labeled close button — pill with text + circle */
+.overlay-close-x--labeled {
+  width: auto;
+  border-radius: 100px;
+  padding: 0 6px 0 12px;
+  gap: 6px;
+  background: var(--ordio);
+}
+.overlay-close-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  color: #fff;
+  font-family: 'Inter', sans-serif;
+}
+.overlay-close-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.2);
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+
+/* Labeled end button on parent monitor — pill with text + circle */
+.end-circle-btn--labeled {
+  width: auto;
+  border-radius: 100px;
+  padding: 0 6px 0 12px;
+  gap: 6px;
+}
+.end-circle-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  white-space: nowrap;
+  color: #fff;
+  font-family: 'Inter', sans-serif;
+}
+.end-circle-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.2);
+  font-size: 0.9rem;
+  flex-shrink: 0;
 }
 
 /* Live badge in dashboard header */
@@ -1050,7 +1274,7 @@ h1, h2, h3, .headline {
 
 /* Timeline */
 .timeline-bar {
-  height: 24px;
+  height: 28px;
   border-radius: 6px;
   overflow: hidden;
   display: flex;
@@ -1157,18 +1381,41 @@ h1, h2, h3, .headline {
   padding: 16px 18px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
+}
+.status-banner-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #374151;
+  opacity: 0.7;
+  margin-bottom: 2px;
 }
 .status-banner-headline {
   font-family: 'Plus Jakarta Sans', sans-serif;
   font-size: 1.15rem;
   font-weight: 700;
   line-height: 1.2;
+  color: #111827;   /* always black */
 }
 .status-banner-subtitle {
   font-size: 0.85rem;
-  color: var(--text-muted-l);
+  color: #374151;   /* always dark, not muted */
   line-height: 1.4;
+}
+
+/* KI-Analyse chip row with label */
+.window-chips-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.window-chips-label {
+  font-size: 0.75rem;
+  color: var(--text-muted-l);
+  font-weight: 500;
 }
 
 /* Bare ConnectionBadge — no pill, just content */
@@ -1217,9 +1464,27 @@ h1, h2, h3, .headline {
 }
 .ai-refresh-btn:active { border-color: var(--ordio); }
 
-/* Timeline disconnected segment */
-.timeline-segment--disconnected { background: #d1d5db; }
-.legend-dot--disconnected { background: #d1d5db; }
+/* Timeline disconnected segment — diagonal stripes, like caution tape */
+.timeline-segment--disconnected {
+  background: repeating-linear-gradient(
+    -45deg,
+    #374151 0px,
+    #374151 4px,
+    #9ca3af 4px,
+    #9ca3af 8px
+  );
+  opacity: 0.85;
+}
+.legend-dot--disconnected {
+  background: repeating-linear-gradient(
+    -45deg,
+    #374151 0px,
+    #374151 3px,
+    #9ca3af 3px,
+    #9ca3af 6px
+  );
+  border: 1px solid #6b7280;
+}
 
 /* Time window selector */
 .live-recap-wrapper {
@@ -1233,7 +1498,6 @@ h1, h2, h3, .headline {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
-  margin-bottom: 10px;
 }
 
 .window-chip {

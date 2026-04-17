@@ -65,12 +65,12 @@ export default function ConnectionBadge({ state, videoQuality, audioQuality, lig
 
   // Fallback simple label for states without quality data
   const simpleLabel: Record<MonitorState, string> = {
-    waiting:      'Warte auf Baby-Gerät…',
+    waiting:      'Warte auf Gerät…',
     connecting:   'Verbinde…',
-    connected:    'Verbunden',
+    connected:    'Online',
     reconnecting: 'Verbinde neu…',
     degraded:     'Nur Audio',
-    critical:     'Verbindung getrennt',
+    critical:     'Offline',
   }
 
   return (
