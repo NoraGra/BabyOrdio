@@ -134,14 +134,22 @@ function BabyRoom({ code, onBack }: { code: string; onBack: () => void }) {
           <ConnectionBadge state={badgeState} />
           <div className="baby-top-actions">
             <button
-              className="icon-btn"
+              className="flip-camera-btn"
               onClick={flipCamera}
               disabled={isSwitchingCamera}
-              title="Flip camera"
+              title="Kamera wechseln"
+              aria-label="Kamera wechseln"
             >
               🔄
             </button>
-            <button className="end-session-btn" onClick={onBack}>End</button>
+            <button
+              className="end-circle-btn"
+              onClick={onBack}
+              title="Beenden"
+              aria-label="Session beenden"
+            >
+              ✕
+            </button>
           </div>
         </div>
 
@@ -160,12 +168,29 @@ function BabyRoom({ code, onBack }: { code: string; onBack: () => void }) {
             </div>
           ) : pairingExpanded ? (
             <>
-              <p className="code-label">Pairing Code</p>
+              <p className="code-label">Code zum Verbinden</p>
               <p className="code-value">{formattedCode}</p>
-              <button className="show-qr-btn" onClick={() => setShowQR(true)}>
-                Zeige QR Code
-              </button>
-              <p className="wake-notice">⚠️ Keep this screen on</p>
+              <p className="code-hint">auf dem Eltern-Gerät unter der Baby Ordio URL eingeben</p>
+              <div className="pairing-actions">
+                <button className="show-qr-btn" onClick={() => setShowQR(true)}>
+                  Zeige QR Code
+                </button>
+                {typeof navigator.share === 'function' && (
+                  <button
+                    className="share-code-btn"
+                    onClick={() =>
+                      navigator.share({
+                        title: 'Baby Ordio',
+                        text: `Dein Verbindungscode: ${formattedCode}`,
+                        url: qrUrl,
+                      }).catch(() => {})
+                    }
+                  >
+                    ↗ Teilen
+                  </button>
+                )}
+              </div>
+              <p className="wake-notice">⚠️ Bildschirm aktiv lassen</p>
             </>
           ) : (
             /* Collapsed state: single small button */

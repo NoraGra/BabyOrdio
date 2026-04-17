@@ -1,3 +1,6 @@
+import BabyIcon from '../components/icons/BabyIcon'
+import ParentIcon from '../components/icons/ParentIcon'
+
 interface Props {
   onSelectBaby: (code: string) => void
   onSelectParent: () => void
@@ -26,10 +29,8 @@ export default function Home({ onSelectBaby, onSelectParent, onViewAnalysis }: P
           className="role-card"
           onClick={() => onSelectBaby(generateCode())}
         >
-          {/* Sleeping-baby illustration placeholder */}
-          <div className="role-card-art role-card-art--baby">
-            <span className="role-art-zzz">z z z</span>
-            <span className="role-art-emoji">👶</span>
+          <div className="role-card-art">
+            <BabyIcon size={76} />
           </div>
           <span className="role-card-name">Baby-Gerät</span>
           <span className="role-card-desc">Kamera &amp; Ton übertragen</span>
@@ -39,10 +40,8 @@ export default function Home({ onSelectBaby, onSelectParent, onViewAnalysis }: P
           className="role-card"
           onClick={onSelectParent}
         >
-          {/* Parents-with-phone illustration placeholder */}
-          <div className="role-card-art role-card-art--parent">
-            <span className="role-art-signal">📶</span>
-            <span className="role-art-emoji">👨‍👩‍👦</span>
+          <div className="role-card-art">
+            <ParentIcon size={76} />
           </div>
           <span className="role-card-name">Eltern-Gerät</span>
           <span className="role-card-desc">Baby beobachten &amp; hören</span>

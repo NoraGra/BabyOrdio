@@ -229,26 +229,32 @@ function ParentRoom({
 
         <div className={`parent-controls ${controlsVisible ? 'controls-visible' : 'controls-hidden'}`}>
           <div className="parent-header">
-            <ConnectionBadge
-              state={monitorState}
-              videoQuality={videoQuality}
-              audioQuality={audioQuality}
-            />
-            <div className="parent-header-right">
-              {(monitorState === 'connected' || monitorState === 'degraded') && (
-                <SessionTimer />
-              )}
+            {/* Left column: badge + Analyse button stacked */}
+            <div className="parent-header-left">
+              <ConnectionBadge
+                state={monitorState}
+                videoQuality={videoQuality}
+                audioQuality={audioQuality}
+              />
               <button
                 className="analyse-btn"
                 onClick={(e) => { e.stopPropagation(); setShowDashboard(true) }}
               >
                 📊 Analyse
               </button>
+            </div>
+            {/* Right: session timer + Beenden circle */}
+            <div className="parent-header-right">
+              {(monitorState === 'connected' || monitorState === 'degraded') && (
+                <SessionTimer />
+              )}
               <button
-                className="end-session-btn"
+                className="end-circle-btn"
                 onClick={(e) => { e.stopPropagation(); handleEnd() }}
+                title="Beenden"
+                aria-label="Session beenden"
               >
-                Ende
+                ✕
               </button>
             </div>
           </div>
@@ -304,6 +310,11 @@ function ParentRoom({
             session={recorder.data}
             stats={recorder.stats}
             isLive
+            liveStatus={
+              monitorState === 'connected'    ? (videoRef && audioRef ? 'full' : 'partial')
+              : monitorState === 'degraded'   ? 'partial'
+              : 'offline'
+            }
             showVideoOffBanner={monitorState === 'degraded'}
             onBack={() => setShowDashboard(false)}
           />

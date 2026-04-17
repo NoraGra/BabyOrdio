@@ -1,11 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import type { SessionData, SessionStats } from '../hooks/useSessionRecorder'
+
+export type LiveStatus = 'full' | 'partial' | 'offline'
 
 interface Props {
   session: SessionData
   stats: SessionStats
   /** True when called from live monitor — session is still running */
   isLive?: boolean
+  /** Connection quality: full = both streams, partial = one, offline = none */
+  liveStatus?: LiveStatus
   /** Show a top banner: Video inaktiv, Audio läuft weiter */
   showVideoOffBanner?: boolean
   onBack: () => void
@@ -39,10 +43,74 @@ function buildTimeline(session: SessionData) {
   })
 }
 
-export default function AnalysisDashboard({ session, stats, isLive = false, showVideoOffBanner = false, onBack }: Props) {
+/** Generates a live German recap of the last 5 minutes from recorded events. */
+function buildLiveSummary(session: SessionData): string {
+  const nowMs = Date.now() - session.startTime.getTime()
+  const windowMs = 5 * 60 * 1000 // last 5 minutes
+  const since = Math.max(0, nowMs - windowMs)
+
+  // Cry events in window
+  const recentCries = session.cryEvents.filter(e => (e.endMs ?? nowMs) >= since)
+  const cryCount = recentCries.length
+  const cryTotalSec = Math.round(
+    recentCries.reduce((sum, e) => sum + ((e.endMs ?? nowMs) - e.startMs), 0) / 1000
+  )
+
+  // Move events in window
+  const recentMoves = session.moveEvents.filter(e => e.timeMs >= since)
+  const moveCount = recentMoves.length
+
+  // Time since last event
+  const lastCryEnd = recentCries.length > 0
+    ? Math.max(...recentCries.map(e => e.endMs ?? nowMs))
+    : null
+  const lastMove = recentMoves.length > 0
+    ? Math.max(...recentMoves.map(e => e.timeMs))
+    : null
+  const lastActivityMs = Math.max(lastCryEnd ?? 0, lastMove ?? 0)
+  const silenceSec = lastActivityMs > 0 ? Math.round((nowMs - lastActivityMs) / 1000) : null
+
+  if (cryCount === 0 && moveCount === 0) {
+    const totalSec = Math.round(nowMs / 1000)
+    if (totalSec < 60) return 'Alles ruhig — Session gerade gestartet.'
+    return `Alles ruhig seit ${totalSec >= 120 ? `${Math.floor(totalSec / 60)} Min.` : `${totalSec} Sek.`}`
+  }
+
+  const parts: string[] = []
+  if (cryCount > 0) {
+    parts.push(`${cryCount}× Weinen (${fmtDur(cryTotalSec)})`)
+  }
+  if (moveCount > 0) {
+    parts.push(`${moveCount} Bewegung${moveCount !== 1 ? 'en' : ''}`)
+  }
+
+  let tail = ''
+  if (silenceSec !== null && silenceSec > 10) {
+    tail = silenceSec >= 120
+      ? ` · Zuletzt ruhig seit ${Math.floor(silenceSec / 60)} Min.`
+      : ` · Zuletzt ruhig seit ${silenceSec} Sek.`
+  }
+
+  return `Letzte 5 Min.: ${parts.join(', ')}${tail}`
+}
+
+export default function AnalysisDashboard({ session, stats, isLive = false, liveStatus = 'offline', showVideoOffBanner = false, onBack }: Props) {
   const [aiSummary, setAiSummary] = useState<string | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
   const timeline = buildTimeline(session)
+
+  // Live recap — refreshes every 15s so the summary stays current
+  const [liveSummary, setLiveSummary] = useState(() => isLive ? buildLiveSummary(session) : '')
+  const liveSummaryRef = useRef(session)
+  liveSummaryRef.current = session
+  useEffect(() => {
+    if (!isLive) return
+    setLiveSummary(buildLiveSummary(liveSummaryRef.current))
+    const id = setInterval(() => {
+      setLiveSummary(buildLiveSummary(liveSummaryRef.current))
+    }, 15_000)
+    return () => clearInterval(id)
+  }, [isLive])
 
   // Only fetch AI summary when session has ended
   useEffect(() => {
@@ -75,12 +143,19 @@ export default function AnalysisDashboard({ session, stats, isLive = false, show
             {isLive ? '← Zurück zur Übertragung' : '← Zurück zur Auswahl'}
           </button>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          {/* Code — plain blue text, no bubble */}
+          <span className="header-code">
+            {session.sessionCode.slice(0,3)} {session.sessionCode.slice(3)}
+          </span>
+          {/* LIVE badge — green / orange / red */}
           {isLive && (
-            <span className="live-badge">🔴 LIVE</span>
+            <span className={`live-badge live-badge--${liveStatus}`}>
+              <span className="live-dot" />
+              {liveStatus === 'offline' ? 'Auf Verbindung warten' : 'LIVE'}
+            </span>
           )}
-          <span className="o-card-tag">{session.sessionCode.slice(0,3)} {session.sessionCode.slice(3)}</span>
-          {/* Big X close button */}
+          {/* X — no circle */}
           <button className="overlay-close-x" onClick={onBack} aria-label="Schließen">
             ✕
           </button>
@@ -218,9 +293,12 @@ export default function AnalysisDashboard({ session, stats, isLive = false, show
             <span className="ai-powered-tag">✨ Claude AI</span>
           </div>
           {isLive ? (
-            <p className="ai-summary-text" style={{ color: 'var(--text-muted-l)', fontStyle: 'italic' }}>
-              Die KI-Analyse wird nach dem Ende der Session erstellt — damit alle Daten einfließen können.
-            </p>
+            <div className="live-recap">
+              <p className="live-recap-text">{liveSummary}</p>
+              <p className="live-recap-hint">
+                Nach der Session erstellt Claude eine vollständige Analyse.
+              </p>
+            </div>
           ) : aiLoading ? (
             <div className="ai-summary-loading">
               <div className="spinner" style={{ width: 20, height: 20, borderWidth: 2 }} />

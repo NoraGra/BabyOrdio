@@ -166,7 +166,7 @@ h1, h2, h3, .headline {
    HOME SCREEN — Baby Ordio blue
    ═══════════════════════════════════════════════════════════════════════ */
 :root {
-  --home-blue: #5BABF5;   /* logo background blue */
+  --home-blue: #5B9BD5;   /* exact Ordio logo blue */
 }
 
 .home-screen {
@@ -511,20 +511,48 @@ h1, h2, h3, .headline {
 
 .qr-hint { font-size: 0.75rem; color: rgba(255,255,255,0.5); }
 
+.code-hint {
+  font-size: 0.72rem;
+  color: rgba(255,255,255,0.5);
+  max-width: 260px;
+  line-height: 1.4;
+  margin-top: 2px;
+}
+
+.pairing-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
 /* Show QR / Verbinden buttons */
 .show-qr-btn {
-  background: rgba(46,91,255,0.25);
-  border: 1px solid rgba(46,91,255,0.5);
-  border-radius: var(--radius-sm);
+  background: #ffffff;
+  border: none;
+  border-radius: 100px;
+  color: var(--ordio);
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 8px 18px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+.show-qr-btn:active { opacity: 0.8; }
+
+.share-code-btn {
+  background: rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.3);
+  border-radius: 100px;
   color: #fff;
   font-size: 0.8rem;
   font-weight: 600;
-  padding: 7px 16px;
+  padding: 8px 16px;
   cursor: pointer;
-  margin-top: 8px;
   transition: background 0.15s;
+  font-family: 'Plus Jakarta Sans', sans-serif;
 }
-.show-qr-btn:active { background: rgba(46,91,255,0.4); }
+.share-code-btn:active { background: rgba(255,255,255,0.25); }
 
 .connect-collapsed-btn {
   background: rgba(0,0,0,0.5);
@@ -555,10 +583,18 @@ h1, h2, h3, .headline {
 
 .parent-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   padding: 16px;
   background: linear-gradient(to bottom, rgba(0,0,0,0.65), transparent);
+}
+
+/* Left column: badge + Analyse stacked */
+.parent-header-left {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
 }
 
 .parent-header-right {
@@ -574,12 +610,12 @@ h1, h2, h3, .headline {
   font-family: 'Inter', sans-serif;
 }
 
-/* Analyse button — on the monitor */
+/* Analyse button — white pill, below the badge */
 .analyse-btn {
-  background: rgba(46,91,255,0.25);
-  border: 1px solid rgba(46,91,255,0.6);
-  border-radius: var(--radius-sm);
-  color: rgba(255,255,255,0.9);
+  background: #ffffff;
+  border: none;
+  border-radius: 100px;
+  color: var(--ordio);
   font-size: 0.8rem;
   font-weight: 600;
   padding: 6px 12px;
@@ -590,7 +626,42 @@ h1, h2, h3, .headline {
   transition: background 0.15s;
   white-space: nowrap;
 }
-.analyse-btn:active { background: rgba(46,91,255,0.45); }
+.analyse-btn:active { opacity: 0.8; }
+
+/* Circular end/close button — white circle with × */
+.end-circle-btn {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: none;
+  color: #111827;
+  font-size: 1.1rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: opacity 0.15s;
+  font-family: 'Inter', sans-serif;
+}
+.end-circle-btn:active { opacity: 0.7; }
+
+/* Flip camera button — white pill */
+.flip-camera-btn {
+  background: #ffffff;
+  border: none;
+  border-radius: 100px;
+  color: #111827;
+  font-size: 1rem;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  line-height: 1;
+}
+.flip-camera-btn:active { opacity: 0.7; }
+.flip-camera-btn:disabled { opacity: 0.4; cursor: default; }
 
 /* Live indicators bottom-right */
 .parent-footer {
@@ -810,7 +881,7 @@ h1, h2, h3, .headline {
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  background: #F3F4F6;
+  background: transparent;
   border: none;
   font-size: 1.1rem;
   font-weight: 700;
@@ -822,7 +893,7 @@ h1, h2, h3, .headline {
   flex-shrink: 0;
   transition: background 0.15s;
 }
-.overlay-close-x:active { background: #E5E7EB; }
+.overlay-close-x:active { background: rgba(0,0,0,0.06); }
 
 /* ── Video-off banner (top of dashboard when degraded) ──────────────── */
 .video-off-banner {
@@ -839,24 +910,60 @@ h1, h2, h3, .headline {
 
 .video-off-icon { font-size: 1.4rem; flex-shrink: 0; margin-top: 1px; }
 
+/* Code shown in dashboard header — plain blue text, no bubble */
+.header-code {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--ordio);
+  letter-spacing: 0.05em;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+}
+
 /* Live badge in dashboard header */
 .live-badge {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  background: #fee2e2;
-  color: #dc2626;
+  gap: 6px;
   font-size: 0.7rem;
   font-weight: 700;
-  padding: 3px 8px;
+  padding: 4px 10px;
   border-radius: 100px;
   letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
   animation: live-pulse 2s ease-in-out infinite;
 }
 
+/* green — both streams */
+.live-badge--full {
+  background: #dcfce7;
+  color: #16a34a;
+}
+.live-badge--full .live-dot { background: #16a34a; }
+
+/* orange — only one stream */
+.live-badge--partial {
+  background: #fff7ed;
+  color: #ea580c;
+}
+.live-badge--partial .live-dot { background: #ea580c; }
+
+/* red — no connection / waiting */
+.live-badge--offline {
+  background: #fee2e2;
+  color: #dc2626;
+}
+.live-badge--offline .live-dot { background: #dc2626; }
+
 @keyframes live-pulse {
   0%, 100% { opacity: 1; }
-  50%       { opacity: 0.6; }
+  50%       { opacity: 0.45; }
 }
 
 .analysis-body {
@@ -1000,6 +1107,30 @@ h1, h2, h3, .headline {
 .stat-card-sub {
   font-size: 0.72rem;
   color: var(--text-muted-l);
+}
+
+/* Live recap (shown during active session in place of AI analysis) */
+.live-recap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px;
+  background: var(--ordio-light);
+  border-radius: var(--radius-sm);
+  border-left: 3px solid var(--ordio);
+}
+
+.live-recap-text {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-l);
+  line-height: 1.5;
+}
+
+.live-recap-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted-l);
+  font-style: italic;
 }
 
 /* AI analysis section */
