@@ -132,9 +132,12 @@ function BabyRoom({ code, onBack }: { code: string; onBack: () => void }) {
       <div className="baby-overlay">
         {/* Top bar */}
         <div className="baby-top">
-          {/* Left: badge + flip button stacked */}
+          {/* Left: badge + wake notice + flip button stacked */}
           <div className="baby-top-left">
-            <ConnectionBadge state={badgeState} />
+            <div className="baby-badge-row">
+              <ConnectionBadge state={badgeState} />
+              <span className="wake-notice-inline">⚠️ Bildschirm aktiv lassen</span>
+            </div>
             <button
               className="flip-camera-btn"
               onClick={flipCamera}
@@ -147,17 +150,18 @@ function BabyRoom({ code, onBack }: { code: string; onBack: () => void }) {
                 <path d="M23 20v-6h-6"/>
                 <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
               </svg>
-              Wechseln
+              Kamera drehen
             </button>
           </div>
-          {/* Right: end button */}
+          {/* Right: end button with label */}
           <button
-            className="end-circle-btn"
+            className="end-circle-btn end-circle-btn--labeled"
             onClick={onBack}
-            title="Beenden"
+            title="Session beenden"
             aria-label="Session beenden"
           >
-            ✕
+            <span className="end-circle-label">Session für alle beenden</span>
+            <span className="end-circle-icon">✕</span>
           </button>
         </div>
 
@@ -182,7 +186,7 @@ function BabyRoom({ code, onBack }: { code: string; onBack: () => void }) {
               <div className="pairing-actions">
                 {typeof navigator.share === 'function' && (
                   <button
-                    className="share-code-btn"
+                    className="show-qr-btn"
                     onClick={() =>
                       navigator.share({
                         title: 'Baby Ordio',
@@ -191,14 +195,26 @@ function BabyRoom({ code, onBack }: { code: string; onBack: () => void }) {
                       }).catch(() => {})
                     }
                   >
-                    ↗ Code teilen
+                    {/* Standard share icon */}
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
+                      <polyline points="16 6 12 2 8 6"/>
+                      <line x1="12" y1="2" x2="12" y2="15"/>
+                    </svg>
+                    Code teilen
                   </button>
                 )}
                 <button className="show-qr-btn" onClick={() => setShowQR(true)}>
-                  Zeige QR Code
+                  {/* QR code icon */}
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="3" y="3" width="7" height="7" rx="1"/>
+                    <rect x="14" y="3" width="7" height="7" rx="1"/>
+                    <rect x="3" y="14" width="7" height="7" rx="1"/>
+                    <path d="M14 14h3v3h-3zM17 17h3v3h-3zM14 17v3M17 14h3"/>
+                  </svg>
+                  Code anzeigen
                 </button>
               </div>
-              <p className="wake-notice">⚠️ Bildschirm aktiv lassen</p>
             </>
           ) : (
             /* Collapsed state: single small button */
@@ -206,7 +222,7 @@ function BabyRoom({ code, onBack }: { code: string; onBack: () => void }) {
               className="connect-collapsed-btn"
               onClick={() => { setPairingExpanded(true); setShowQR(true) }}
             >
-              Verbinden
+              Code anzeigen
             </button>
           )}
         </div>

@@ -20,7 +20,7 @@ export default function HelpButton({ screen, large = false }: Props) {
         <svg
           viewBox="0 0 24 24"
           fill="none"
-          stroke="currentColor"
+          stroke="#ffffff"
           strokeWidth={large ? 2.2 : 2.5}
           strokeLinecap="round"
           strokeLinejoin="round"

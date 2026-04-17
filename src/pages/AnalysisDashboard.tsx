@@ -4,6 +4,7 @@ import ConnectionBadge from '../components/ConnectionBadge'
 import type { QualityLevel } from '../components/ConnectionBadge'
 import { CryIcon, MoveIcon, RestIcon, SleepQualityIcon, AudioIcon } from '../components/icons/DashboardIcon'
 import HelpButton from '../components/HelpButton'
+import StatusIllustration from '../components/StatusIllustration'
 
 export type LiveStatus = 'full' | 'partial' | 'offline'
 
@@ -206,6 +207,67 @@ function buildTimeline(session: SessionData) {
   })
 }
 
+// ── Unified activity list ───────────────────────────────────────────────────
+
+interface ActivityItem {
+  id: string
+  timeMs: number
+  endMs: number | null
+  hasCry: boolean
+  hasMove: boolean
+  cryDurationMs: number | null
+  cryPeakLevel: number
+  movePeakIntensity: number
+}
+
+function buildActivityList(session: SessionData): ActivityItem[] {
+  const items: ActivityItem[] = []
+  const MERGE_WINDOW_MS = 20_000  // merge move events within 20s of a cry
+
+  // Create an item per cry event
+  for (const cry of session.cryEvents) {
+    items.push({
+      id:               cry.id,
+      timeMs:           cry.startMs,
+      endMs:            cry.endMs,
+      hasCry:           true,
+      hasMove:          false,
+      cryDurationMs:    cry.endMs != null ? cry.endMs - cry.startMs : null,
+      cryPeakLevel:     cry.peakLevel,
+      movePeakIntensity: 0,
+    })
+  }
+
+  // Attach move events to overlapping cry items, or create standalone items
+  for (const move of session.moveEvents) {
+    const overlap = items.find(it =>
+      it.hasCry &&
+      move.timeMs >= it.timeMs - MERGE_WINDOW_MS &&
+      move.timeMs <= (it.endMs ?? it.timeMs) + MERGE_WINDOW_MS
+    )
+    if (overlap) {
+      overlap.hasMove = true
+      overlap.movePeakIntensity = Math.max(overlap.movePeakIntensity, move.intensity)
+    } else {
+      // Only add standalone move items if notable intensity
+      if (move.intensity >= 3) {
+        items.push({
+          id:                move.id,
+          timeMs:            move.timeMs,
+          endMs:             move.timeMs,
+          hasCry:            false,
+          hasMove:           true,
+          cryDurationMs:     null,
+          cryPeakLevel:      0,
+          movePeakIntensity: move.intensity,
+        })
+      }
+    }
+  }
+
+  return items.sort((a, b) => a.timeMs - b.timeMs)
+}
+
 // ── Time window filtering ───────────────────────────────────────────────────
 
 type WindowMinutes = 5 | 15 | 30 | 'all'
@@ -259,18 +321,24 @@ function filterStatsForWindow(
 
 // ── AI analysis call ────────────────────────────────────────────────────────
 
-async function fetchAiAnalysis(session: SessionData, stats: SessionStats, isLive: boolean): Promise<string> {
+async function fetchAiAnalysis(
+  session: SessionData,
+  stats: SessionStats,
+  isLive: boolean,
+  window: WindowMinutes,
+): Promise<string> {
   const r = await fetch('/api/analyze', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      durationSec:  stats.durationSec,
-      cryCount:     stats.cryCount,
-      cryTotalSec:  stats.cryTotalSec,
-      moveCount:    stats.moveCount,
-      peakCryLevel: stats.peakCryLevel,
-      sessionCode:  session.sessionCode,
+      durationSec:   stats.durationSec,
+      cryCount:      stats.cryCount,
+      cryTotalSec:   stats.cryTotalSec,
+      moveCount:     stats.moveCount,
+      peakCryLevel:  stats.peakCryLevel,
+      sessionCode:   session.sessionCode,
       isLive,
+      windowMinutes: window === 'all' ? null : window,
     }),
   })
   const d = await r.json()
@@ -284,12 +352,16 @@ export default function AnalysisDashboard({
   liveDetectors, videoQuality, audioQuality,
   showVideoOffBanner = false, onBack,
 }: Props) {
-  const timeline = buildTimeline(session)
+  const timeline     = buildTimeline(session)
+  const activityList = buildActivityList(session)
 
   // Status banner
   const statusInfo = isLive
     ? computeLiveStatus(session, stats, liveDetectors, liveStatus)
     : computePostSessionStatus(session, stats)
+
+  // Timeline segment selection
+  const [selectedSegIdx, setSelectedSegIdx] = useState<number | null>(null)
 
   // AI analysis — available for both live (on demand) and post-session (auto)
   const [aiSummary, setAiSummary]   = useState<string | null>(null)
@@ -304,7 +376,7 @@ export default function AnalysisDashboard({
     setAiLoading(true)
     setAiSummary(null)
     const filtered = filterStatsForWindow(sessionRef.current, statsRef.current, win)
-    fetchAiAnalysis(sessionRef.current, filtered, isLive)
+    fetchAiAnalysis(sessionRef.current, filtered, isLive, win)
       .then(text => setAiSummary(text))
       .catch(() => setAiSummary('KI-Analyse konnte nicht geladen werden.'))
       .finally(() => setAiLoading(false))
@@ -353,11 +425,16 @@ export default function AnalysisDashboard({
             borderColor: STATUS_COLORS[statusInfo.color].border,
           }}
         >
-          <p className="status-banner-label">
-            {isLive ? 'Dein Kind gerade:' : 'Dein Kind:'}
-          </p>
-          <p className="status-banner-headline">{statusInfo.headline}</p>
-          <p className="status-banner-subtitle">{statusInfo.subtitle}</p>
+          <div className="status-banner-text">
+            <p className="status-banner-label">
+              {isLive ? 'Dein Kind gerade:' : 'Dein Kind:'}
+            </p>
+            <p className="status-banner-headline">{statusInfo.headline}</p>
+            <p className="status-banner-subtitle">{statusInfo.subtitle}</p>
+          </div>
+          <div className="status-banner-illus">
+            <StatusIllustration color={statusInfo.color} headline={statusInfo.headline} />
+          </div>
         </div>
 
         {/* ── KI-Analyse ───────────────────────────────────────────── */}
@@ -433,10 +510,7 @@ export default function AnalysisDashboard({
               <span className="stat-card-icon">
                 <SleepQualityIcon size={24} level={stats.sleepQuality} />
               </span>
-              <span className="stat-card-value" style={{
-                fontSize: '1rem',
-                color: stats.sleepQuality === 'deep' ? '#16a34a' : stats.sleepQuality === 'light' ? '#ca8a04' : '#ea580c'
-              }}>
+              <span className="stat-card-value" style={{ fontSize: '1rem', color: '#111827' }}>
                 {stats.sleepQuality === 'deep' ? 'Tief' : stats.sleepQuality === 'light' ? 'Leicht' : 'Unruhig'}
               </span>
               <span className="stat-card-label">Schlafqualität</span>
@@ -500,14 +574,47 @@ export default function AnalysisDashboard({
           {timeline.length > 0 ? (
             <>
               <div className="timeline-bar">
-                {timeline.map((seg, i) => (
-                  <div
-                    key={i}
-                    className={`timeline-segment timeline-segment--${seg.type}`}
-                    style={{ width: `${seg.pct}%` }}
-                  />
-                ))}
+                {timeline.map((seg, i) => {
+                  const segStartMs = i * (((session.endTime ?? new Date()).getTime() - session.startTime.getTime()) / timeline.length)
+                  const segEndMs   = (i + 1) * (((session.endTime ?? new Date()).getTime() - session.startTime.getTime()) / timeline.length)
+                  const isActive   = i === selectedSegIdx
+                  const isClickable = seg.type !== 'quiet'
+                  return (
+                    <div
+                      key={i}
+                      className={`timeline-segment timeline-segment--${seg.type}${isClickable ? ' timeline-segment--clickable' : ''}${isActive ? ' timeline-segment--active' : ''}`}
+                      style={{ width: `${seg.pct}%` }}
+                      onClick={() => isClickable && setSelectedSegIdx(isActive ? null : i)}
+                      title={isClickable ? 'Tippen für Details' : undefined}
+                      data-start-ms={segStartMs}
+                      data-end-ms={segEndMs}
+                    />
+                  )
+                })}
               </div>
+
+              {/* Segment detail popup */}
+              {selectedSegIdx !== null && timeline[selectedSegIdx] && (() => {
+                const seg     = timeline[selectedSegIdx]
+                const total   = (session.endTime ?? new Date()).getTime() - session.startTime.getTime()
+                const segMs   = total / timeline.length
+                const startMs = selectedSegIdx * segMs
+                const endMs   = (selectedSegIdx + 1) * segMs
+                const timeStr = `${fmtTime(startMs, session.startTime)} – ${fmtTime(endMs, session.startTime)}`
+                const typeLabel = seg.type === 'cry' ? 'Weinen' : seg.type === 'move' ? 'Bewegung' : seg.type === 'both' ? 'Weinen + Bewegung' : 'Verbindung unterbrochen'
+                const typeIcon  = seg.type === 'cry' ? '😢' : seg.type === 'move' ? '🤸' : seg.type === 'both' ? '😢🤸' : '⚡'
+                return (
+                  <div className="timeline-popup" onClick={() => setSelectedSegIdx(null)}>
+                    <span className="timeline-popup-icon">{typeIcon}</span>
+                    <div className="timeline-popup-content">
+                      <span className="timeline-popup-time">{timeStr}</span>
+                      <span className="timeline-popup-label">{typeLabel}</span>
+                    </div>
+                    <button className="timeline-popup-close" aria-label="Schließen">✕</button>
+                  </div>
+                )
+              })()}
+
               <div className="timeline-legend">
                 <span className="legend-item"><span className="legend-dot legend-dot--quiet"/>Ruhig</span>
                 <span className="legend-item"><span className="legend-dot legend-dot--cry"/>Weinen</span>
@@ -523,48 +630,52 @@ export default function AnalysisDashboard({
           )}
         </div>
 
-        {/* ── Cry events log ───────────────────────────────────────── */}
-        {session.cryEvents.length > 0 && (
+        {/* ── Unified activity log ──────────────────────────────────── */}
+        {activityList.length > 0 && (
           <div className="o-card">
             <div className="o-card-header">
-              <span className="o-card-title">Weinphasen</span>
-              <span className="o-card-tag">{session.cryEvents.length}</span>
+              <span className="o-card-title">Aktivitäten</span>
+              <span className="o-card-tag">{activityList.length}</span>
             </div>
             <div className="event-list">
-              {session.cryEvents.map((e) => (
-                <div className="event-row" key={e.id}>
-                  <span className="event-row-icon"><CryIcon size={16} /></span>
-                  <span className="event-row-time">{fmtTime(e.startMs, session.startTime)}</span>
-                  <span className="event-row-desc"><IntensityDots level={e.peakLevel} /></span>
-                  <span className="event-row-dur">
-                    {e.endMs ? fmtDur(Math.round((e.endMs - e.startMs) / 1000)) : 'läuft…'}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* ── Move events log ──────────────────────────────────────── */}
-        {session.moveEvents.length > 0 && (
-          <div className="o-card">
-            <div className="o-card-header">
-              <span className="o-card-title">Bewegungen</span>
-              <span className="o-card-tag">{session.moveEvents.length}</span>
-            </div>
-            <div className="event-list">
-              {session.moveEvents.slice(-10).map((e) => (
-                <div className="event-row" key={e.id}>
-                  <span className="event-row-icon"><MoveIcon size={16} /></span>
-                  <span className="event-row-time">{fmtTime(e.timeMs, session.startTime)}</span>
-                  <span className="event-row-desc"><IntensityDots level={e.intensity} /></span>
-                </div>
-              ))}
-              {session.moveEvents.length > 10 && (
-                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted-l)', marginTop: 4 }}>
-                  + {session.moveEvents.length - 10} weitere
-                </p>
-              )}
+              {activityList.map((item) => {
+                const durationSec = item.cryDurationMs != null
+                  ? Math.round(item.cryDurationMs / 1000) : null
+                const peakIntensity = Math.max(item.cryPeakLevel, item.movePeakIntensity)
+                const typeLabel = item.hasCry && item.hasMove ? 'Weinen + Bewegung'
+                  : item.hasCry ? 'Weinen'
+                  : 'Bewegung'
+                return (
+                  <div className="event-row activity-row" key={item.id}>
+                    <span className="event-row-icon">
+                      {item.hasCry && item.hasMove ? (
+                        <span className="activity-icons">
+                          <CryIcon size={14} /><MoveIcon size={14} />
+                        </span>
+                      ) : item.hasCry ? (
+                        <CryIcon size={16} />
+                      ) : (
+                        <MoveIcon size={16} />
+                      )}
+                    </span>
+                    <div className="activity-row-main">
+                      <div className="activity-row-top">
+                        <span className="event-row-time">{fmtTime(item.timeMs, session.startTime)}</span>
+                        <span className="activity-type-label">{typeLabel}</span>
+                        {durationSec != null && (
+                          <span className="event-row-dur">{fmtDur(durationSec)}</span>
+                        )}
+                      </div>
+                      {peakIntensity > 0 && (
+                        <div className="activity-row-bottom">
+                          <IntensityDots level={peakIntensity} />
+                          <span className="activity-intensity-label">Intensität {peakIntensity}/10</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
         )}

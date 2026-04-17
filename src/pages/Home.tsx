@@ -68,6 +68,8 @@ export default function Home({ onSelectBaby, onSelectParent, onViewAnalysis }: P
         </button>
       )}
 
+      <p className="home-wake-notice">⚠️ Bildschirm des Baby-Geräts muss während der Session aktiv bleiben</p>
+
       <HelpButton screen="home" large />
     </div>
   )

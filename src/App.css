@@ -140,7 +140,7 @@ h1, h2, h3, .headline {
   gap: 6px;
   background: none;
   border: none;
-  color: var(--text-muted-l);
+  color: var(--ordio);
   font-size: 0.9rem;
   font-family: 'Inter', sans-serif;
   cursor: pointer;
@@ -293,6 +293,17 @@ h1, h2, h3, .headline {
   font-size: 0.75rem;
   color: #6B7280;
   line-height: 1.3;
+}
+
+/* Bottom wake notice on home screen */
+.home-wake-notice {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.7);
+  text-align: center;
+  padding: 0 24px;
+  line-height: 1.5;
+  margin-top: auto;
+  padding-bottom: 8px;
 }
 
 /* Last session shortcut */
@@ -557,12 +568,15 @@ h1, h2, h3, .headline {
   margin-top: 10px;
 }
 
-/* Show QR / Verbinden buttons */
+/* Pairing action buttons — white pill, blue text + icon */
 .show-qr-btn {
   background: #ffffff;
   border: none;
   border-radius: 100px;
   color: var(--ordio);
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 0.8rem;
   font-weight: 700;
   padding: 8px 18px;
@@ -572,11 +586,12 @@ h1, h2, h3, .headline {
 }
 .show-qr-btn:active { opacity: 0.8; }
 
+/* share-code-btn now matches show-qr-btn — keeping for legacy reference */
 .share-code-btn {
-  background: rgba(255,255,255,0.15);
-  border: 1px solid rgba(255,255,255,0.3);
+  background: #ffffff;
+  border: none;
   border-radius: 100px;
-  color: #fff;
+  color: var(--ordio);
   font-size: 0.8rem;
   font-weight: 600;
   padding: 8px 16px;
@@ -587,10 +602,10 @@ h1, h2, h3, .headline {
 .share-code-btn:active { background: rgba(255,255,255,0.25); }
 
 .connect-collapsed-btn {
-  background: rgba(0,0,0,0.5);
-  border: 1px solid rgba(255,255,255,0.2);
-  border-radius: var(--radius-sm);
-  color: rgba(255,255,255,0.55);
+  background: var(--ordio);
+  border: none;
+  border-radius: 100px;
+  color: #ffffff;
   font-size: 0.75rem;
   font-weight: 600;
   padding: 6px 14px;
@@ -692,12 +707,12 @@ h1, h2, h3, .headline {
   gap: 8px;
 }
 
-/* Flip camera button — blue pill, white icon + text */
+/* Flip camera button — white pill, blue icon + text */
 .flip-camera-btn {
-  background: var(--ordio);
+  background: #ffffff;
   border: none;
   border-radius: 100px;
-  color: #ffffff;
+  color: var(--ordio);
   font-size: 0.78rem;
   font-weight: 600;
   padding: 7px 12px;
@@ -711,6 +726,20 @@ h1, h2, h3, .headline {
 }
 .flip-camera-btn:active  { opacity: 0.8; }
 .flip-camera-btn:disabled { opacity: 0.4; cursor: default; }
+
+/* Wake notice inline next to badge */
+.baby-badge-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.wake-notice-inline {
+  font-size: 0.7rem;
+  color: rgba(255,255,255,0.75);
+  font-weight: 500;
+  white-space: nowrap;
+}
 
 /* (parent-footer removed — indicators now live in parent-bottom-left) */
 
@@ -990,18 +1019,11 @@ h1, h2, h3, .headline {
   color: var(--text-l, #111827);
 }
 
-.help-sheet-close {
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  border: none;
-  background: #f3f4f6;
-  color: #6b7280;
-  font-size: 0.9rem;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.help-sheet-dismiss-hint {
+  text-align: center;
+  font-size: 0.72rem;
+  color: #9ca3af;
+  padding: 12px 20px 4px;
 }
 
 .help-items {
@@ -1213,6 +1235,16 @@ h1, h2, h3, .headline {
   border-radius: var(--radius);
   box-shadow: var(--shadow-card);
   padding: 18px 20px;
+  animation: card-enter 0.35s ease both;
+}
+.o-card:nth-child(2) { animation-delay: 0.05s; }
+.o-card:nth-child(3) { animation-delay: 0.10s; }
+.o-card:nth-child(4) { animation-delay: 0.15s; }
+.o-card:nth-child(5) { animation-delay: 0.20s; }
+.o-card:nth-child(n+6) { animation-delay: 0.25s; }
+@keyframes card-enter {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 .o-card-header {
@@ -1380,8 +1412,22 @@ h1, h2, h3, .headline {
   border-radius: var(--radius);
   padding: 16px 18px;
   display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 14px;
+  transition: background 0.5s ease, border-color 0.5s ease;
+}
+.status-banner-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
   flex-direction: column;
   gap: 3px;
+}
+.status-banner-illus {
+  flex-shrink: 0;
+  width: 110px;
+  height: 84px;
 }
 .status-banner-label {
   font-size: 0.72rem;
@@ -1696,4 +1742,312 @@ h1, h2, h3, .headline {
   .baby-overlay    { padding-bottom: max(16px, env(safe-area-inset-bottom)); }
   .baby-top        { padding-top: max(12px, env(safe-area-inset-top)); }
   .parent-header   { padding-top: max(16px, env(safe-area-inset-top)); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SCREEN TRANSITIONS — slide in from right (forward) or left (back)
+   ═══════════════════════════════════════════════════════════════════════ */
+.screen-enter { position: fixed; inset: 0; }
+.screen-enter--forward { animation: screen-slide-right 0.28s cubic-bezier(0.2, 0, 0, 1) both; }
+.screen-enter--back    { animation: screen-slide-left  0.28s cubic-bezier(0.2, 0, 0, 1) both; }
+
+@keyframes screen-slide-right {
+  from { transform: translateX(100%); }
+  to   { transform: translateX(0); }
+}
+@keyframes screen-slide-left {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(0); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   INTRO ANIMATION — logo fades in, "o" circle grows, screen reveals
+   ═══════════════════════════════════════════════════════════════════════ */
+.intro-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  background: var(--home-blue);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  animation: intro-fade-out 2.7s ease forwards;
+  pointer-events: none;
+}
+
+.intro-logo-wrap {
+  position: relative;
+  z-index: 2;
+  text-align: center;
+  animation: intro-logo-anim 2.7s ease forwards;
+}
+
+.intro-logo-text {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-weight: 800;
+  font-size: 3rem;
+  line-height: 1.0;
+  letter-spacing: -0.02em;
+  color: #fff;
+  user-select: none;
+}
+.intro-logo-text span { display: block; }
+.intro-logo-baby { font-size: 1.35rem; opacity: 0.85; font-weight: 600; }
+.intro-logo-ordio { font-size: 3rem; }
+
+.intro-circle {
+  position: absolute;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  box-shadow: 0 0 60px rgba(255, 255, 255, 0.35);
+  animation: intro-circle-grow 2.7s ease forwards;
+  z-index: 1;
+}
+
+@keyframes intro-logo-anim {
+  0%   { opacity: 0; transform: scale(0.88); }
+  18%  { opacity: 1; transform: scale(1); }
+  58%  { opacity: 1; transform: scale(1); }
+  76%  { opacity: 0; transform: scale(1.08); }
+  100% { opacity: 0; }
+}
+
+@keyframes intro-circle-grow {
+  0%   { transform: scale(0); opacity: 0; }
+  44%  { transform: scale(0); opacity: 0; }
+  52%  { transform: scale(0.1); opacity: 1; }
+  82%  { transform: scale(80); opacity: 1; }
+  100% { transform: scale(80); opacity: 1; }
+}
+
+@keyframes intro-fade-out {
+  0%   { opacity: 1; }
+  82%  { opacity: 1; }
+  96%  { opacity: 0; }
+  100% { opacity: 0; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TIMELINE — clickable segments & popup
+   ═══════════════════════════════════════════════════════════════════════ */
+.timeline-segment--clickable {
+  cursor: pointer;
+  transition: opacity 0.15s, filter 0.15s;
+}
+.timeline-segment--clickable:hover  { opacity: 0.75; filter: brightness(1.08); }
+.timeline-segment--active { outline: 2px solid var(--ordio); outline-offset: 1px; }
+
+.timeline-popup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--text-l);
+  color: #fff;
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  margin-top: 8px;
+  font-size: 0.82rem;
+  cursor: pointer;
+  animation: fade-in 0.15s ease;
+}
+
+.timeline-popup-icon { font-size: 1.1rem; flex-shrink: 0; }
+.timeline-popup-content { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.timeline-popup-time  { font-size: 0.72rem; opacity: 0.7; }
+.timeline-popup-label { font-weight: 600; }
+.timeline-popup-close { background: none; border: none; color: rgba(255,255,255,0.6); font-size: 0.85rem; cursor: pointer; padding: 0; flex-shrink: 0; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ACTIVITY LIST — unified events (cry + move)
+   ═══════════════════════════════════════════════════════════════════════ */
+.activity-row {
+  padding: 10px;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 10px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-l);
+  border: 1px solid var(--border-l);
+  margin-bottom: 6px;
+}
+.activity-row:last-child { margin-bottom: 0; }
+
+.activity-icons {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.activity-row-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.activity-row-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.activity-type-label {
+  font-weight: 600;
+  font-size: 0.82rem;
+  color: var(--text-l);
+  flex: 1;
+}
+
+.activity-row-bottom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.activity-intensity-label {
+  font-size: 0.72rem;
+  color: var(--text-muted-l);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   STATUS ILLUSTRATION — SVG animations
+   ═══════════════════════════════════════════════════════════════════════ */
+.status-illus {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+}
+
+/* Sleeping — moon glow */
+.illus-glow {
+  animation: illus-pulse 3s ease-in-out infinite;
+}
+@keyframes illus-pulse {
+  0%, 100% { r: 38; opacity: 0.07; }
+  50%       { r: 42; opacity: 0.12; }
+}
+
+/* Stars twinkling */
+.illus-star { animation: illus-twinkle 2.5s ease-in-out infinite; }
+.illus-star-1 { animation-delay: 0s; }
+.illus-star-2 { animation-delay: 0.7s; }
+.illus-star-3 { animation-delay: 1.4s; }
+@keyframes illus-twinkle {
+  0%, 100% { opacity: 0.9; r: 3; }
+  50%       { opacity: 0.2; r: 1.5; }
+}
+
+/* Zzz floating up */
+.illus-z { animation: illus-z-float 3s ease-in-out infinite; }
+.illus-z1 { animation-delay: 0s; }
+.illus-z2 { animation-delay: 0.8s; }
+.illus-z3 { animation-delay: 1.6s; }
+@keyframes illus-z-float {
+  0%   { opacity: 0; transform: translateY(5px); }
+  25%  { opacity: 0.9; transform: translateY(0); }
+  75%  { opacity: 0.8; transform: translateY(-10px); }
+  100% { opacity: 0; transform: translateY(-16px); }
+}
+
+/* Calm — ripple rings (scale + fade from center) */
+.illus-ring {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: illus-ripple 2.4s ease-out infinite;
+}
+.illus-ring-1 { animation-delay: 0s; }
+.illus-ring-2 { animation-delay: 0.8s; }
+.illus-ring-3 { animation-delay: 1.6s; }
+@keyframes illus-ripple {
+  0%   { transform: scale(0.25); opacity: 0.85; }
+  100% { transform: scale(1);    opacity: 0; }
+}
+
+/* Heartbeat */
+.illus-heartbeat {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: illus-heartbeat 1.8s ease-in-out infinite;
+}
+@keyframes illus-heartbeat {
+  0%, 100% { transform: scale(1); }
+  14%       { transform: scale(1.18); }
+  28%       { transform: scale(1); }
+  42%       { transform: scale(1.12); }
+  70%       { transform: scale(1); }
+}
+
+/* Moving — waves oscillating */
+.illus-wave {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: illus-wave-osc 1.4s ease-in-out infinite;
+}
+.illus-wave-1 { animation-delay: 0s; }
+.illus-wave-2 { animation-delay: 0.18s; }
+.illus-wave-3 { animation-delay: 0.36s; }
+@keyframes illus-wave-osc {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-5px); }
+}
+
+/* Moving dots pulsing */
+.illus-wave-dot {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: illus-dot-pulse 1.4s ease-in-out infinite;
+}
+.illus-wave-dot-1 { animation-delay: 0s; }
+.illus-wave-dot-2 { animation-delay: 0.2s; }
+.illus-wave-dot-3 { animation-delay: 0.4s; }
+@keyframes illus-dot-pulse {
+  0%, 100% { transform: scale(1) translateY(0); }
+  50%       { transform: scale(1.3) translateY(-3px); }
+}
+
+/* Crying — sound waves pulsing out */
+.illus-sound-src {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: illus-src-pulse 1.2s ease-in-out infinite;
+}
+@keyframes illus-src-pulse {
+  0%, 100% { transform: scale(1); }
+  50%       { transform: scale(1.2); }
+}
+
+.illus-sound-wave {
+  transform-box: fill-box;
+  transform-origin: left center;
+  animation: illus-soundwave-pulse 1.6s ease-in-out infinite;
+}
+.illus-sound-w1 { animation-delay: 0s; }
+.illus-sound-w2 { animation-delay: 0.25s; }
+.illus-sound-w3 { animation-delay: 0.5s; }
+@keyframes illus-soundwave-pulse {
+  0%, 100% { opacity: 1; stroke-width: 2.5; }
+  50%       { opacity: 0.5; stroke-width: 1.8; }
+}
+
+/* Offline — X blink */
+.illus-offline-x {
+  animation: illus-x-blink 2s ease-in-out infinite;
+}
+@keyframes illus-x-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+
+/* Small screen: shrink illustration */
+@media (max-width: 360px) {
+  .status-banner-illus { width: 80px; height: 64px; }
+}
+@media (max-height: 600px) {
+  .status-banner-illus { width: 80px; height: 64px; }
+  .status-banner { gap: 10px; }
 }

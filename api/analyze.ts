@@ -8,6 +8,7 @@ interface SessionStats {
   peakCryLevel: number
   sessionCode: string
   isLive?: boolean
+  windowMinutes?: number | null
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -32,19 +33,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const crySec = stats.cryTotalSec % 60
 
     const isLive = !!stats.isLive
+    const hasWindow = stats.windowMinutes != null
+    const windowLabel = hasWindow ? `letzten ${stats.windowMinutes} Minuten` : null
+
     const context = isLive
-      ? `Du analysierst eine laufende Baby-Monitor-Session. Die Daten zeigen den bisherigen Verlauf.`
-      : `Du analysierst eine abgeschlossene Baby-Monitor-Session.`
+      ? hasWindow
+        ? `Du analysierst eine laufende Baby-Monitor-Session. Die Daten beziehen sich nur auf die ${windowLabel}.`
+        : `Du analysierst eine laufende Baby-Monitor-Session. Die Daten zeigen den gesamten bisherigen Verlauf.`
+      : hasWindow
+        ? `Du analysierst einen Ausschnitt einer abgeschlossenen Baby-Monitor-Session: die ${windowLabel}.`
+        : `Du analysierst eine abgeschlossene Baby-Monitor-Session.`
+
+    const timeframeDesc = hasWindow
+      ? `Zeitraum: die ${windowLabel} (${durationMin > 0 ? `${durationMin} Min. ` : ''}${durationSec} Sek. Daten)`
+      : `Dauer: ${durationMin > 0 ? `${durationMin} Min. ` : ''}${durationSec} Sek.`
 
     const prompt = `Du bist ein einfühlsamer Baby-Monitor-Assistent. ${context}
 
-Session-Daten (bisher):
-- Dauer: ${durationMin > 0 ? `${durationMin} Min. ` : ''}${durationSec} Sek.
+Daten:
+- ${timeframeDesc}
 - Weinphasen: ${stats.cryCount} Mal (gesamt ${cryMin > 0 ? `${cryMin} Min. ` : ''}${crySec} Sek.)
 - Stärkstes Weinen: ${stats.peakCryLevel}/10
 - Bewegungsereignisse: ${stats.moveCount}
 
-Schreibe 2–3 Sätze auf Deutsch. Sei warm, konkret und direkt — keine Floskeln. ${isLive ? 'Beziehe dich auf den bisherigen Verlauf der laufenden Session.' : 'Fasse die Session zusammen.'} Keine Aufzählungen, kein Markdown.`
+Schreibe 2–3 Sätze auf Deutsch. Wichtig: Sprich vom ${hasWindow ? `Zeitraum der ${windowLabel}` : 'Verlauf der Session'} — NICHT von "der Session" wenn es ein Zeitfenster ist. Sei warm, konkret und direkt. Keine Aufzählungen, kein Markdown.`
 
     const message = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
@@ -64,18 +76,22 @@ Schreibe 2–3 Sätze auf Deutsch. Sei warm, konkret und direkt — keine Floske
 
 function generateFallbackAnalysis(stats: SessionStats): string {
   const durationMin = Math.floor(stats.durationSec / 60)
+  const hasWindow   = stats.windowMinutes != null
+  const periodLabel = hasWindow
+    ? `Die letzten ${stats.windowMinutes} Minuten`
+    : durationMin > 0 ? `Die ${durationMin}-minütige Session` : 'Der beobachtete Zeitraum'
 
   if (stats.cryCount === 0 && stats.moveCount < 3) {
-    return `Das Baby hat während der ${durationMin}-minütigen Session sehr ruhig geschlafen — keine Weinphasen und kaum Bewegung. Alles war in Ordnung.`
+    return `${periodLabel} verlief sehr ruhig — keine Weinphasen und kaum Bewegung. Alles in Ordnung.`
   }
 
   if (stats.cryCount === 0) {
-    return `Die ${durationMin}-minütige Session verlief ruhig: Kein Weinen festgestellt, jedoch ${stats.moveCount} Bewegungen registriert — das Baby hat sich etwas geregt, war aber insgesamt entspannt.`
+    return `${periodLabel} verlief ruhig: Kein Weinen festgestellt, jedoch ${stats.moveCount} Bewegungen registriert — das Baby hat sich etwas geregt, war aber insgesamt entspannt.`
   }
 
   const cryMin = Math.floor(stats.cryTotalSec / 60)
   const crySec = stats.cryTotalSec % 60
   const durStr = cryMin > 0 ? `${cryMin} Min. ${crySec} Sek.` : `${crySec} Sek.`
 
-  return `In den ${durationMin} Minuten hat das Baby ${stats.cryCount} Mal geweint (gesamt ${durStr}). Die Bewegungsaktivität war mit ${stats.moveCount} Ereignissen ${stats.moveCount > 10 ? 'recht hoch' : 'moderat'}. Die stärkste Weinphase erreichte Intensität ${stats.peakCryLevel}/10.`
+  return `${hasWindow ? `In den letzten ${stats.windowMinutes} Minuten` : `In diesen ${durationMin} Minuten`} hat das Baby ${stats.cryCount} Mal geweint (gesamt ${durStr}). Die Bewegungsaktivität war mit ${stats.moveCount} Ereignissen ${stats.moveCount > 10 ? 'recht hoch' : 'moderat'}. Die stärkste Weinphase erreichte Intensität ${stats.peakCryLevel}/10.`
 }
