@@ -4,6 +4,10 @@ import type { SessionData, SessionStats } from '../hooks/useSessionRecorder'
 interface Props {
   session: SessionData
   stats: SessionStats
+  /** True when called from live monitor — session is still running */
+  isLive?: boolean
+  /** Show a top banner: Video inaktiv, Audio läuft weiter */
+  showVideoOffBanner?: boolean
   onBack: () => void
 }
 
@@ -17,61 +21,50 @@ function fmtTime(msFromStart: number, startTime: Date): string {
   return t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
-/** Build a colour-coded timeline array from events */
 function buildTimeline(session: SessionData) {
   const total = (session.endTime ?? new Date()).getTime() - session.startTime.getTime()
   if (total <= 0) return []
 
-  interface Seg { type: 'quiet' | 'cry' | 'move' | 'both'; pct: number }
-  const segments: Seg[] = []
-
-  // Resolution: 1 bucket per 5 s
+  type SegType = 'quiet' | 'cry' | 'move' | 'both'
   const bucketMs = 5000
   const numBuckets = Math.max(1, Math.round(total / bucketMs))
 
-  for (let i = 0; i < numBuckets; i++) {
+  return Array.from({ length: numBuckets }, (_, i) => {
     const lo = i * bucketMs
     const hi = (i + 1) * bucketMs
-
-    const hasCry = session.cryEvents.some(e => {
-      const end = e.endMs ?? total
-      return e.startMs < hi && end > lo
-    })
+    const hasCry  = session.cryEvents.some(e => e.startMs < hi && (e.endMs ?? total) > lo)
     const hasMove = session.moveEvents.some(e => e.timeMs >= lo && e.timeMs < hi)
-
-    segments.push({
-      type: hasCry && hasMove ? 'both' : hasCry ? 'cry' : hasMove ? 'move' : 'quiet',
-      pct: 100 / numBuckets,
-    })
-  }
-  return segments
+    const type: SegType = hasCry && hasMove ? 'both' : hasCry ? 'cry' : hasMove ? 'move' : 'quiet'
+    return { type, pct: 100 / numBuckets }
+  })
 }
 
-export default function AnalysisDashboard({ session, stats, onBack }: Props) {
+export default function AnalysisDashboard({ session, stats, isLive = false, showVideoOffBanner = false, onBack }: Props) {
   const [aiSummary, setAiSummary] = useState<string | null>(null)
-  const [aiLoading, setAiLoading] = useState(true)
+  const [aiLoading, setAiLoading] = useState(false)
   const timeline = buildTimeline(session)
 
+  // Only fetch AI summary when session has ended
   useEffect(() => {
-    const payload = {
-      durationSec:  stats.durationSec,
-      cryCount:     stats.cryCount,
-      cryTotalSec:  stats.cryTotalSec,
-      moveCount:    stats.moveCount,
-      peakCryLevel: stats.peakCryLevel,
-      sessionCode:  session.sessionCode,
-    }
-
+    if (isLive) return
+    setAiLoading(true)
     fetch('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        durationSec:  stats.durationSec,
+        cryCount:     stats.cryCount,
+        cryTotalSec:  stats.cryTotalSec,
+        moveCount:    stats.moveCount,
+        peakCryLevel: stats.peakCryLevel,
+        sessionCode:  session.sessionCode,
+      }),
     })
       .then(r => r.json())
       .then(d => setAiSummary(d.analysis ?? null))
       .catch(() => setAiSummary('KI-Analyse konnte nicht geladen werden.'))
       .finally(() => setAiLoading(false))
-  }, [])  // run once on mount
+  }, [isLive]) // runs once when component mounts, skipped if isLive
 
   return (
     <div className="screen analysis-screen">
@@ -79,12 +72,33 @@ export default function AnalysisDashboard({ session, stats, onBack }: Props) {
       <div className="analysis-header">
         <div className="analysis-header-left">
           <button className="analysis-nav-back" onClick={onBack}>
-            ← Zurück
+            {isLive ? '← Zurück zur Übertragung' : '← Zurück zur Auswahl'}
           </button>
-          <span className="analysis-title">Session-Analyse</span>
         </div>
-        <span className="o-card-tag">{session.sessionCode.slice(0,3)} {session.sessionCode.slice(3)}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {isLive && (
+            <span className="live-badge">🔴 LIVE</span>
+          )}
+          <span className="o-card-tag">{session.sessionCode.slice(0,3)} {session.sessionCode.slice(3)}</span>
+          {/* Big X close button */}
+          <button className="overlay-close-x" onClick={onBack} aria-label="Schließen">
+            ✕
+          </button>
+        </div>
       </div>
+
+      {/* Video-off banner */}
+      {showVideoOffBanner && (
+        <div className="video-off-banner">
+          <span className="video-off-icon">🔊</span>
+          <div>
+            <strong>Video inaktiv</strong> — Audio läuft weiter
+            <div style={{ fontSize: '0.75rem', opacity: 0.85, marginTop: 2 }}>
+              Verbindung ist schwach. Video wird bei Verbesserung automatisch reaktiviert.
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="analysis-body">
 
@@ -105,12 +119,22 @@ export default function AnalysisDashboard({ session, stats, onBack }: Props) {
                 {session.startTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               </span>
             </div>
-            <div className="session-meta-item">
-              <span className="meta-label">Ende</span>
-              <span className="meta-value">
-                {(session.endTime ?? new Date()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </span>
-            </div>
+            {!isLive && session.endTime && (
+              <div className="session-meta-item">
+                <span className="meta-label">Ende</span>
+                <span className="meta-value">
+                  {session.endTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              </div>
+            )}
+            {isLive && (
+              <div className="session-meta-item">
+                <span className="meta-label">Status</span>
+                <span className="meta-value" style={{ color: '#22c55e', fontSize: '0.95rem' }}>
+                  ● Aktiv
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
@@ -118,6 +142,7 @@ export default function AnalysisDashboard({ session, stats, onBack }: Props) {
         <div className="o-card">
           <div className="o-card-header">
             <span className="o-card-title">Timeline</span>
+            {isLive && <span style={{ fontSize: '0.72rem', color: 'var(--text-muted-l)' }}>aktualisiert live</span>}
           </div>
           {timeline.length > 0 ? (
             <>
@@ -151,7 +176,7 @@ export default function AnalysisDashboard({ session, stats, onBack }: Props) {
               </div>
             </>
           ) : (
-            <p className="empty-state">Keine Daten aufgezeichnet</p>
+            <p className="empty-state">Noch keine Aktivität aufgezeichnet</p>
           )}
         </div>
 
@@ -186,13 +211,17 @@ export default function AnalysisDashboard({ session, stats, onBack }: Props) {
           </div>
         </div>
 
-        {/* ── AI Summary ───────────────────────────────────────────── */}
+        {/* ── AI Summary — only after session ends ─────────────────── */}
         <div className="o-card">
           <div className="o-card-header">
             <span className="o-card-title">KI-Analyse</span>
             <span className="ai-powered-tag">✨ Claude AI</span>
           </div>
-          {aiLoading ? (
+          {isLive ? (
+            <p className="ai-summary-text" style={{ color: 'var(--text-muted-l)', fontStyle: 'italic' }}>
+              Die KI-Analyse wird nach dem Ende der Session erstellt — damit alle Daten einfließen können.
+            </p>
+          ) : aiLoading ? (
             <div className="ai-summary-loading">
               <div className="spinner" style={{ width: 20, height: 20, borderWidth: 2 }} />
               Analyse läuft…
@@ -210,13 +239,15 @@ export default function AnalysisDashboard({ session, stats, onBack }: Props) {
               <span className="o-card-tag">{session.cryEvents.length}×</span>
             </div>
             <div className="events-list">
-              {session.cryEvents.map((e, i) => (
+              {session.cryEvents.map((e) => (
                 <div className="event-row" key={e.id}>
                   <span className="event-row-icon">😢</span>
                   <span className="event-row-time">{fmtTime(e.startMs, session.startTime)}</span>
                   <span className="event-row-desc">Intensität {e.peakLevel}/10</span>
                   <span className="event-row-dur">
-                    {e.endMs != null ? fmtDur(Math.round((e.endMs - e.startMs) / 1000)) : 'läuft'}
+                    {e.endMs != null
+                      ? fmtDur(Math.round((e.endMs - e.startMs) / 1000))
+                      : <span style={{ color: '#ef4444' }}>läuft…</span>}
                   </span>
                 </div>
               ))}
@@ -246,7 +277,6 @@ export default function AnalysisDashboard({ session, stats, onBack }: Props) {
           </div>
         )}
 
-        {/* Spacer at bottom for comfortable scrolling */}
         <div style={{ height: 32 }} />
       </div>
     </div>

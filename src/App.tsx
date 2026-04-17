@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import Home from './pages/Home'
-import BabyDevice from './pages/BabyDevice'
-import ParentJoin from './pages/ParentJoin'
-import ParentMonitor from './pages/ParentMonitor'
+import Home              from './pages/Home'
+import BabyDevice        from './pages/BabyDevice'
+import ParentJoin        from './pages/ParentJoin'
+import ParentMonitor     from './pages/ParentMonitor'
 import AnalysisDashboard from './pages/AnalysisDashboard'
 import type { SessionData, SessionStats } from './hooks/useSessionRecorder'
 
@@ -15,18 +15,15 @@ type Screen =
 
 interface SavedSession { data: SessionData; stats: SessionStats }
 
-// If the URL has ?code=XXXXXX (from a QR scan), jump straight to monitoring
 function getInitialScreen(): Screen {
   const params = new URLSearchParams(window.location.search)
   const code = params.get('code')
-  if (code && /^\d{6}$/.test(code)) {
-    return { view: 'parent-monitor', code }
-  }
+  if (code && /^\d{6}$/.test(code)) return { view: 'parent-monitor', code }
   return { view: 'home' }
 }
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>(getInitialScreen)
+  const [screen, setScreen]           = useState<Screen>(getInitialScreen)
   const [savedSession, setSavedSession] = useState<SavedSession | null>(null)
 
   if (screen.view === 'home') {
@@ -62,9 +59,9 @@ export default function App() {
       <ParentMonitor
         code={screen.code}
         onBack={() => setScreen({ view: 'home' })}
-        onOpenAnalysis={(data, stats) => {
+        onSessionEnd={(data, stats) => {
+          // Save session so it can be viewed from the Home screen later
           setSavedSession({ data, stats })
-          setScreen({ view: 'analysis' })
         }}
       />
     )
@@ -75,6 +72,7 @@ export default function App() {
       <AnalysisDashboard
         session={savedSession.data}
         stats={savedSession.stats}
+        isLive={false}
         onBack={() => setScreen({ view: 'home' })}
       />
     )

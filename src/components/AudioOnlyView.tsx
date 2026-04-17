@@ -2,11 +2,6 @@ interface Props {
   waiting?: boolean
 }
 
-/**
- * Shown on the parent screen when video is unavailable.
- * - waiting=true  → baby hasn't joined yet
- * - waiting=false → video degraded, audio only
- */
 export default function AudioOnlyView({ waiting = false }: Props) {
   return (
     <div className="audio-only-view">
@@ -21,7 +16,9 @@ export default function AudioOnlyView({ waiting = false }: Props) {
         ))}
       </div>
       <p className="audio-only-label">
-        {waiting ? 'Waiting for Baby Device…' : 'Audio only — video paused to maintain connection'}
+        {waiting
+          ? 'Warte auf Baby-Gerät…'
+          : 'Nur Audio — Video pausiert für stabile Verbindung'}
       </p>
     </div>
   )

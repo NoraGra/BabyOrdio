@@ -21,13 +21,13 @@ export default function ParentJoin({ onJoin, onBack }: Props) {
   return (
     <div className="screen join-screen">
       <button className="back-button" onClick={onBack}>
-        ← Back
+        ← Zurück zur Auswahl
       </button>
 
       <div className="join-content">
-        <h2 className="join-title">Enter Pairing Code</h2>
+        <h2 className="join-title">Verbindungscode eingeben</h2>
         <p className="join-subtitle">
-          Open the app on the baby's device and enter the 6-digit code shown there.
+          Öffne die App auf dem Baby-Gerät und gib den 6-stelligen Code ein, der dort angezeigt wird.
         </p>
 
         <form className="join-form" onSubmit={handleSubmit}>
@@ -48,7 +48,7 @@ export default function ParentJoin({ onJoin, onBack }: Props) {
             type="submit"
             disabled={!isValid}
           >
-            Start Monitoring
+            Monitoring starten
           </button>
         </form>
       </div>

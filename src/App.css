@@ -98,21 +98,40 @@ h1, h2, h3, .headline {
    SHARED BUTTONS (Ordio style)
    ═══════════════════════════════════════════════════════════════════════ */
 .primary-button {
-  background: var(--ordio);
+  background: var(--home-blue, #5BABF5);
   color: #fff;
   border: none;
-  border-radius: var(--radius);
+  border-radius: 100px;   /* pill shape */
   padding: 16px 32px;
   font-size: 1rem;
-  font-weight: 600;
-  font-family: 'Inter', sans-serif;
+  font-weight: 700;
+  font-family: 'Plus Jakarta Sans', sans-serif;
   cursor: pointer;
   transition: background 0.15s, transform 0.1s;
   width: 100%;
   max-width: 320px;
+  box-shadow: 0 4px 16px rgba(91,171,245,0.35);
 }
-.primary-button:disabled { opacity: 0.35; cursor: not-allowed; }
-.primary-button:not(:disabled):active { background: var(--ordio-dark); transform: scale(0.99); }
+.primary-button:disabled { opacity: 0.35; cursor: not-allowed; box-shadow: none; }
+.primary-button:not(:disabled):active { transform: scale(0.98); box-shadow: none; }
+
+/* Secondary / outline pill */
+.secondary-button {
+  background: #fff;
+  color: var(--text-l);
+  border: 1.5px solid var(--border-l);
+  border-radius: 100px;
+  padding: 15px 32px;
+  font-size: 1rem;
+  font-weight: 700;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+  width: 100%;
+  max-width: 320px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+.secondary-button:active { transform: scale(0.98); background: #f9fafb; }
 
 .back-button {
   display: flex;
@@ -126,6 +145,7 @@ h1, h2, h3, .headline {
   cursor: pointer;
   padding: 16px;
   align-self: flex-start;
+  min-height: 44px;  /* same tap target as X button */
 }
 .back-button:active { opacity: 0.6; }
 
@@ -143,102 +163,126 @@ h1, h2, h3, .headline {
 .end-session-btn:active { background: rgba(255,255,255,0.2); }
 
 /* ═══════════════════════════════════════════════════════════════════════
-   HOME SCREEN — Ordio light
+   HOME SCREEN — Baby Ordio blue
    ═══════════════════════════════════════════════════════════════════════ */
+:root {
+  --home-blue: #5BABF5;   /* logo background blue */
+}
+
 .home-screen {
-  background: var(--bg-l);
-  justify-content: center;
+  background: var(--home-blue);
+  justify-content: flex-start;
   align-items: center;
-  padding: 32px 24px;
-  gap: 40px;
-  color: var(--text-l);
+  padding-top: 100px;   /* ~100 px from top edge per design */
+  padding-bottom: 40px;
+  padding-left: 24px;
+  padding-right: 24px;
+  gap: 48px;
+  overflow-y: auto;
 }
 
-.home-header { text-align: center; }
+/* ── Logo ──────────────────────────────────────────────────────────── */
+.home-logo-area { text-align: center; }
 
-.home-wordmark {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-
-.home-wordmark-icon {
-  width: 40px;
-  height: 40px;
-  background: var(--ordio);
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.2rem;
-}
-
-.home-wordmark-text {
+.home-logo-text {
   font-family: 'Plus Jakarta Sans', sans-serif;
-  font-size: 1.6rem;
   font-weight: 800;
-  color: var(--text-l);
-  letter-spacing: -0.03em;
+  font-size: 2.8rem;
+  line-height: 1.0;
+  letter-spacing: -0.02em;
+  color: #fff;
+  user-select: none;
 }
+.home-logo-text span { display: block; }
 
-.home-wordmark-sub {
-  font-family: 'Plus Jakarta Sans', sans-serif;
-  font-size: 1.6rem;
-  font-weight: 800;
-  color: var(--ordio);
-  letter-spacing: -0.03em;
-}
-
-.home-subtitle {
-  margin-top: 4px;
-  color: var(--text-muted-l);
-  font-size: 0.9rem;
-  font-weight: 400;
-}
-
-.home-buttons {
+/* ── Role cards ─────────────────────────────────────────────────────── */
+.home-cards {
   display: flex;
-  flex-direction: column;
-  gap: 12px;
+  gap: 16px;
   width: 100%;
   max-width: 360px;
+  justify-content: center;
 }
 
-.role-button {
+.role-card {
+  flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 16px;
-  background: var(--surface-l);
-  border: 1.5px solid var(--border-l);
-  border-radius: var(--radius);
-  padding: 20px 20px;
+  gap: 12px;
+  background: #fff;
+  border: none;
+  border-radius: 20px;
+  padding: 24px 12px 20px;
   cursor: pointer;
-  text-align: left;
-  transition: border-color 0.15s, box-shadow 0.15s;
-  box-shadow: var(--shadow-card);
+  text-align: center;
+  /* Same shadow style as pill buttons */
+  box-shadow: 0 4px 20px rgba(0,0,0,0.18), 0 1px 4px rgba(0,0,0,0.08);
+  transition: transform 0.15s, box-shadow 0.15s;
 }
-.role-button:active { transform: scale(0.99); }
-.role-button--baby:hover   { border-color: var(--ordio); }
-.role-button--parent:hover { border-color: var(--ordio); }
+.role-card:active {
+  transform: scale(0.97);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.15);
+}
 
-.role-icon-wrap {
-  width: 44px;
-  height: 44px;
-  background: var(--ordio-light);
-  border-radius: 12px;
+/* Illustration art area */
+.role-card-art {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: #EEF4FF;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.4rem;
-  flex-shrink: 0;
 }
 
-.role-text { flex: 1; }
-.role-name  { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 1rem; font-weight: 700; color: var(--text-l); }
-.role-desc  { font-size: 0.82rem; color: var(--text-muted-l); margin-top: 2px; }
-.role-arrow { color: var(--text-muted-l); font-size: 1.1rem; }
+.role-art-emoji { font-size: 2.4rem; line-height: 1; }
+
+.role-art-zzz {
+  position: absolute;
+  top: -4px;
+  right: -8px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--home-blue);
+  letter-spacing: 0.1em;
+  opacity: 0.8;
+}
+
+.role-art-signal {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  font-size: 0.9rem;
+}
+
+.role-card-name {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.role-card-desc {
+  font-size: 0.75rem;
+  color: #6B7280;
+  line-height: 1.3;
+}
+
+/* Last session shortcut */
+.home-analysis-btn {
+  background: rgba(255,255,255,0.2);
+  border: 1.5px solid rgba(255,255,255,0.5);
+  border-radius: 100px;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 10px 22px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.home-analysis-btn:active { background: rgba(255,255,255,0.3); }
 
 /* ═══════════════════════════════════════════════════════════════════════
    JOIN SCREEN — Ordio light
@@ -246,6 +290,14 @@ h1, h2, h3, .headline {
 .join-screen {
   background: var(--bg-l);
   color: var(--text-l);
+}
+
+/* On join screen the back-button sits at the top — make it big & German */
+.join-screen .back-button {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--ordio);
+  padding: 20px;
 }
 
 .join-content {
@@ -328,6 +380,37 @@ h1, h2, h3, .headline {
   font-weight: 600;
   letter-spacing: 0.02em;
   white-space: nowrap;
+}
+
+/* Quality grid inside badge — 2 rows × 3 cols: icon | bars | label */
+.badge-quality-grid {
+  display: grid;
+  grid-template-columns: 16px 36px auto;
+  row-gap: 4px;
+  column-gap: 5px;
+  align-items: center;
+}
+
+.badge-track-icon { font-size: 0.8rem; line-height: 1; }
+
+.badge-quality-label {
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
+/* Signal bars (3 bars of increasing height) */
+.signal-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.signal-bar {
+  width: 4px;
+  border-radius: 2px;
+  transition: background 0.3s;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -712,11 +795,68 @@ h1, h2, h3, .headline {
   font-size: 0.9rem;
   font-weight: 600;
   cursor: pointer;
-  padding: 16px 0;
+  /* Same min-height as the X button so they visually match */
+  min-height: 44px;
+  padding: 0;
   font-family: 'Inter', sans-serif;
   display: flex;
   align-items: center;
   gap: 4px;
+  white-space: nowrap;
+}
+
+/* ── Overlay X close button ─────────────────────────────────────────── */
+.overlay-close-x {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: #F3F4F6;
+  border: none;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: #374151;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.overlay-close-x:active { background: #E5E7EB; }
+
+/* ── Video-off banner (top of dashboard when degraded) ──────────────── */
+.video-off-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: #FFF7ED;
+  border-bottom: 1px solid #FED7AA;
+  padding: 14px 20px;
+  color: #92400E;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+.video-off-icon { font-size: 1.4rem; flex-shrink: 0; margin-top: 1px; }
+
+/* Live badge in dashboard header */
+.live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #fee2e2;
+  color: #dc2626;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 100px;
+  letter-spacing: 0.04em;
+  animation: live-pulse 2s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.6; }
 }
 
 .analysis-body {

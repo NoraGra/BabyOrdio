@@ -12,60 +12,49 @@ export default function Home({ onSelectBaby, onSelectParent, onViewAnalysis }: P
   return (
     <div className="screen home-screen">
 
-      {/* Wordmark */}
-      <div className="home-header">
-        <div className="home-wordmark">
-          <div className="home-wordmark-icon">👶</div>
-          <span>
-            <span className="home-wordmark-text">Baby </span>
-            <span className="home-wordmark-sub">Ordio</span>
-          </span>
-        </div>
-        <p className="home-subtitle">Wähle deine Rolle um zu beginnen</p>
+      {/* Logo — ~100 px from top */}
+      <div className="home-logo-area">
+        <p className="home-logo-text">
+          <span className="home-logo-baby">baby</span>
+          <span className="home-logo-ordio">ordio</span>
+        </p>
       </div>
 
-      {/* Role buttons */}
-      <div className="home-buttons">
+      {/* Role cards */}
+      <div className="home-cards">
         <button
-          className="role-button role-button--baby"
+          className="role-card"
           onClick={() => onSelectBaby(generateCode())}
         >
-          <div className="role-icon-wrap">🍼</div>
-          <div className="role-text">
-            <div className="role-name">Baby-Gerät</div>
-            <div className="role-desc">Dieses Gerät filmt &amp; überträgt</div>
+          {/* Sleeping-baby illustration placeholder */}
+          <div className="role-card-art role-card-art--baby">
+            <span className="role-art-zzz">z z z</span>
+            <span className="role-art-emoji">👶</span>
           </div>
-          <span className="role-arrow">›</span>
+          <span className="role-card-name">Baby-Gerät</span>
+          <span className="role-card-desc">Kamera &amp; Ton übertragen</span>
         </button>
 
         <button
-          className="role-button role-button--parent"
+          className="role-card"
           onClick={onSelectParent}
         >
-          <div className="role-icon-wrap">👀</div>
-          <div className="role-text">
-            <div className="role-name">Eltern-Gerät</div>
-            <div className="role-desc">Schaue &amp; höre dein Baby zu</div>
+          {/* Parents-with-phone illustration placeholder */}
+          <div className="role-card-art role-card-art--parent">
+            <span className="role-art-signal">📶</span>
+            <span className="role-art-emoji">👨‍👩‍👦</span>
           </div>
-          <span className="role-arrow">›</span>
+          <span className="role-card-name">Eltern-Gerät</span>
+          <span className="role-card-desc">Baby beobachten &amp; hören</span>
         </button>
-
-        {/* Show last analysis if available */}
-        {onViewAnalysis && (
-          <button
-            className="role-button"
-            style={{ borderColor: 'var(--ordio)', opacity: 0.85 }}
-            onClick={onViewAnalysis}
-          >
-            <div className="role-icon-wrap" style={{ background: 'var(--ordio-light)' }}>📊</div>
-            <div className="role-text">
-              <div className="role-name">Letzte Analyse</div>
-              <div className="role-desc">Session-Report ansehen</div>
-            </div>
-            <span className="role-arrow" style={{ color: 'var(--ordio)' }}>›</span>
-          </button>
-        )}
       </div>
+
+      {/* Last session shortcut */}
+      {onViewAnalysis && (
+        <button className="home-analysis-btn" onClick={onViewAnalysis}>
+          📊 Letzte Session ansehen
+        </button>
+      )}
     </div>
   )
 }
