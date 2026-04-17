@@ -47,6 +47,44 @@ export function PeakIcon({ size = 20 }: Props) {
   )
 }
 
+/** Zzz moon — Ruhezeit / sleep quality */
+export function RestIcon({ size = 20 }: Props) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      {/* Crescent moon */}
+      <path
+        d="M14.5 11.5 A6 6 0 1 1 8 5 A4.5 4.5 0 0 0 14.5 11.5Z"
+        fill={BLUE}
+        opacity="0.85"
+      />
+      {/* zzz letters */}
+      <text x="12" y="8"  fontSize="3.5" fontWeight="700" fill={BLUE} opacity="0.5"  fontFamily="sans-serif">z</text>
+      <text x="14" y="6"  fontSize="4"   fontWeight="700" fill={BLUE} opacity="0.65" fontFamily="sans-serif">z</text>
+      <text x="16" y="4"  fontSize="4.5" fontWeight="700" fill={BLUE} opacity="0.8"  fontFamily="sans-serif">z</text>
+    </svg>
+  )
+}
+
+/** Shield / calm — for sleep quality good state */
+export function SleepQualityIcon({ size = 20, level = 'deep' }: Props & { level?: 'deep' | 'light' | 'restless' }) {
+  const color = level === 'deep' ? '#16a34a' : level === 'light' ? '#ca8a04' : '#ea580c'
+  return (
+    <svg width={size} height={size} viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      {/* Simple bed icon */}
+      <rect x="2" y="11" width="16" height="5" rx="2" fill={color} opacity="0.2" stroke={color} strokeWidth="1.5" />
+      <rect x="2" y="11" width="5" height="5" rx="1.5" fill={color} opacity="0.3" />
+      {/* Pillow arc */}
+      <path d="M4 11 Q10 7 16 11" stroke={color} strokeWidth="1.5" strokeLinecap="round" fill="none" />
+      {/* Head */}
+      <circle cx="10" cy="9" r="2.5" fill={color} opacity="0.8" />
+      {/* Z */}
+      {level === 'deep' && (
+        <text x="13" y="7" fontSize="4" fontWeight="700" fill={color} opacity="0.65" fontFamily="sans-serif">z</text>
+      )}
+    </svg>
+  )
+}
+
 export function AudioIcon({ size = 20 }: Props) {
   const c = AMBER
   return (

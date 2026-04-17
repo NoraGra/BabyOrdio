@@ -7,6 +7,7 @@ interface SessionStats {
   moveCount: number
   peakCryLevel: number
   sessionCode: string
+  isLive?: boolean
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -30,15 +31,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const cryMin = Math.floor(stats.cryTotalSec / 60)
     const crySec = stats.cryTotalSec % 60
 
-    const prompt = `Du bist ein einfühlsamer Baby-Monitor-Assistent. Analysiere folgende Session-Daten und schreibe eine kurze, warme Zusammenfassung auf Deutsch für die Eltern.
+    const isLive = !!stats.isLive
+    const context = isLive
+      ? `Du analysierst eine laufende Baby-Monitor-Session. Die Daten zeigen den bisherigen Verlauf.`
+      : `Du analysierst eine abgeschlossene Baby-Monitor-Session.`
 
-Session-Daten:
-- Gesamtdauer: ${durationMin > 0 ? `${durationMin} Min. ` : ''}${durationSec} Sek.
+    const prompt = `Du bist ein einfühlsamer Baby-Monitor-Assistent. ${context}
+
+Session-Daten (bisher):
+- Dauer: ${durationMin > 0 ? `${durationMin} Min. ` : ''}${durationSec} Sek.
 - Weinphasen: ${stats.cryCount} Mal (gesamt ${cryMin > 0 ? `${cryMin} Min. ` : ''}${crySec} Sek.)
 - Stärkstes Weinen: ${stats.peakCryLevel}/10
 - Bewegungsereignisse: ${stats.moveCount}
 
-Schreibe 2–3 Sätze. Sei warm, beruhigend und konkret. Keine Aufzählungen, kein Markdown. Wenn wenig passiert ist, schreibe das positiv. Wenn viel geweint wurde, sei empathisch.`
+Schreibe 2–3 Sätze auf Deutsch. Sei warm, konkret und direkt — keine Floskeln. ${isLive ? 'Beziehe dich auf den bisherigen Verlauf der laufenden Session.' : 'Fasse die Session zusammen.'} Keine Aufzählungen, kein Markdown.`
 
     const message = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',

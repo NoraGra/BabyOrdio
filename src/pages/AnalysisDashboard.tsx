@@ -1,22 +1,25 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import type { SessionData, SessionStats } from '../hooks/useSessionRecorder'
 import ConnectionBadge from '../components/ConnectionBadge'
 import type { QualityLevel } from '../components/ConnectionBadge'
-import { CryIcon, MoveIcon, PeakIcon, AudioIcon } from '../components/icons/DashboardIcon'
+import { CryIcon, MoveIcon, RestIcon, SleepQualityIcon, AudioIcon } from '../components/icons/DashboardIcon'
 
 export type LiveStatus = 'full' | 'partial' | 'offline'
+
+interface LiveDetectors {
+  isCrying: boolean
+  isMoving: boolean
+  moveIntensity: number
+}
 
 interface Props {
   session: SessionData
   stats: SessionStats
-  /** True when called from live monitor — session is still running */
   isLive?: boolean
-  /** Connection quality: full = both streams, partial = one, offline = none */
   liveStatus?: LiveStatus
-  /** Per-track quality levels (only when isLive) */
+  liveDetectors?: LiveDetectors
   videoQuality?: QualityLevel
   audioQuality?: QualityLevel
-  /** Show a top banner: Video inaktiv, Audio läuft weiter */
   showVideoOffBanner?: boolean
   onBack: () => void
 }
@@ -31,17 +34,177 @@ function fmtTime(msFromStart: number, startTime: Date): string {
   return t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
+// ── Intensity dots ──────────────────────────────────────────────────────────
+
+function IntensityDots({ level, max = 10 }: { level: number; max?: number }) {
+  return (
+    <span className="intensity-dots" aria-label={`Intensität ${level} von ${max}`}>
+      {Array.from({ length: max }, (_, i) => (
+        <span key={i} className={`intensity-dot ${i < level ? 'intensity-dot--filled' : ''}`} />
+      ))}
+    </span>
+  )
+}
+
+// ── Status banner logic ─────────────────────────────────────────────────────
+
+type StatusColor = 'green' | 'yellow' | 'orange' | 'red' | 'gray'
+interface StatusInfo { headline: string; subtitle: string; color: StatusColor }
+
+function computeLiveStatus(
+  session: SessionData,
+  stats: SessionStats,
+  detectors?: LiveDetectors,
+  liveStatus?: LiveStatus,
+): StatusInfo {
+  const nowMs       = Date.now() - session.startTime.getTime()
+  const openCry     = session.cryEvents.find(e => e.endMs === null)
+  const isCrying    = detectors?.isCrying || !!openCry
+  const isMoving    = detectors?.isMoving ?? false
+  const intensity   = detectors?.moveIntensity ?? 0
+
+  if (liveStatus === 'offline') {
+    return { headline: 'Verbindung getrennt', subtitle: 'Status kann nicht beurteilt werden.', color: 'gray' }
+  }
+
+  if (isCrying) {
+    const cryCount = session.cryEvents.length
+    const dur      = openCry ? Math.round((nowMs - openCry.startMs) / 1000) : 0
+    return {
+      headline: 'Weint gerade',
+      subtitle: `${cryCount > 1 ? `${cryCount}. Phase · ` : ''}läuft seit ${fmtDur(dur)}`,
+      color:    'red',
+    }
+  }
+
+  if (isMoving && intensity >= 7) {
+    return {
+      headline: 'Sehr unruhig',
+      subtitle: `Starke Bewegungen · Intensität ${intensity}/10`,
+      color:    'orange',
+    }
+  }
+
+  if (isMoving) {
+    return {
+      headline: 'Bewegt sich',
+      subtitle: `Leichte Bewegungen · Intensität ${intensity}/10`,
+      color:    'yellow',
+    }
+  }
+
+  // Check last activity
+  const lastCryEnd  = session.cryEvents.length > 0
+    ? Math.max(...session.cryEvents.map(e => e.endMs ?? nowMs)) : 0
+  const lastMoveMs  = session.moveEvents.length > 0
+    ? Math.max(...session.moveEvents.map(e => e.timeMs)) : 0
+  const lastActivity = Math.max(lastCryEnd, lastMoveMs)
+  const quietSec     = lastActivity > 0 ? Math.round((nowMs - lastActivity) / 1000) : Math.round(nowMs / 1000)
+
+  if (quietSec < 30) {
+    return { headline: 'Gerade ruhig geworden', subtitle: `Aktiv war vor ${quietSec} Sek.`, color: 'yellow' }
+  }
+  if (quietSec < 5 * 60) {
+    const totalCries = stats.cryCount
+    const sub = totalCries > 0
+      ? `Ruhig seit ${fmtDur(quietSec)} · ${totalCries}× geweint bisher`
+      : `Ruhig seit ${fmtDur(quietSec)}`
+    return { headline: 'Ruhig', subtitle: sub, color: 'green' }
+  }
+  if (quietSec < 15 * 60) {
+    return {
+      headline: 'Schläft wahrscheinlich',
+      subtitle: `Keine Aktivität seit ${fmtDur(quietSec)}`,
+      color: 'green',
+    }
+  }
+  return {
+    headline: 'Schläft tief',
+    subtitle: `Keine Aktivität seit ${Math.floor(quietSec / 60)} Min.`,
+    color: 'green',
+  }
+}
+
+function computePostSessionStatus(session: SessionData, stats: SessionStats): StatusInfo {
+  const { cryCount, cryTotalSec, moveCount, durationSec } = stats
+
+  if (cryCount === 0 && moveCount < 5) {
+    return {
+      headline: 'Hat durchgeschlafen 💤',
+      subtitle: `${fmtDur(durationSec)} ohne Weinen · ${moveCount} leichte Bewegungen`,
+      color: 'green',
+    }
+  }
+  if (cryCount === 0) {
+    return {
+      headline: 'Ruhige Session',
+      subtitle: `Kein Weinen · ${moveCount} Bewegungen insgesamt`,
+      color: 'green',
+    }
+  }
+  if (cryCount === 1 && cryTotalSec < 45) {
+    return {
+      headline: 'Fast durchgeschlafen',
+      subtitle: `1× kurz geweint (${fmtDur(cryTotalSec)}) · danach sofort beruhigt`,
+      color: 'yellow',
+    }
+  }
+  if (cryCount === 1) {
+    return {
+      headline: 'Einmal geweint',
+      subtitle: `1 Weinphase (${fmtDur(cryTotalSec)}) · ${moveCount} Bewegungen`,
+      color: 'yellow',
+    }
+  }
+  if (cryCount <= 3 && cryTotalSec < 120) {
+    return {
+      headline: 'Leicht unruhig',
+      subtitle: `${cryCount}× geweint · gesamt ${fmtDur(cryTotalSec)} · ${moveCount} Bewegungen`,
+      color: 'orange',
+    }
+  }
+  if (cryCount <= 5) {
+    return {
+      headline: 'Unruhige Session',
+      subtitle: `${cryCount}× geweint · gesamt ${fmtDur(cryTotalSec)} · ${moveCount} Bewegungen`,
+      color: 'orange',
+    }
+  }
+  return {
+    headline: 'Schwierige Nacht',
+    subtitle: `${cryCount}× geweint · gesamt ${fmtDur(cryTotalSec)} · häufiges Aufwachen`,
+    color: 'red',
+  }
+}
+
+const STATUS_COLORS: Record<StatusColor, { bg: string; text: string; border: string }> = {
+  green:  { bg: '#f0fdf4', text: '#15803d', border: '#bbf7d0' },
+  yellow: { bg: '#fefce8', text: '#854d0e', border: '#fef08a' },
+  orange: { bg: '#fff7ed', text: '#c2410c', border: '#fed7aa' },
+  red:    { bg: '#fef2f2', text: '#b91c1c', border: '#fecaca' },
+  gray:   { bg: '#f9fafb', text: '#6b7280', border: '#e5e7eb' },
+}
+
+// ── Timeline ────────────────────────────────────────────────────────────────
+
 function buildTimeline(session: SessionData) {
   const total = (session.endTime ?? new Date()).getTime() - session.startTime.getTime()
   if (total <= 0) return []
 
-  type SegType = 'quiet' | 'cry' | 'move' | 'both'
-  const bucketMs = 5000
+  type SegType = 'quiet' | 'cry' | 'move' | 'both' | 'disconnected'
+  const bucketMs   = 5000
   const numBuckets = Math.max(1, Math.round(total / bucketMs))
 
   return Array.from({ length: numBuckets }, (_, i) => {
     const lo = i * bucketMs
     const hi = (i + 1) * bucketMs
+
+    // Connection lost takes priority
+    const isDisconnected = session.connectionEvents.some(
+      e => e.startMs < hi && (e.endMs ?? total) > lo
+    )
+    if (isDisconnected) return { type: 'disconnected' as SegType, pct: 100 / numBuckets }
+
     const hasCry  = session.cryEvents.some(e => e.startMs < hi && (e.endMs ?? total) > lo)
     const hasMove = session.moveEvents.some(e => e.timeMs >= lo && e.timeMs < hi)
     const type: SegType = hasCry && hasMove ? 'both' : hasCry ? 'cry' : hasMove ? 'move' : 'quiet'
@@ -49,139 +212,124 @@ function buildTimeline(session: SessionData) {
   })
 }
 
-type LiveWindow = 5 | 15 | 30 | null   // null = since start
+// ── Time window filtering ───────────────────────────────────────────────────
 
-/** Movement trend: compare activity in first half vs second half of window */
-function moveTrend(moves: SessionData['moveEvents'], since: number, nowMs: number): '↑' | '↓' | '→' | null {
-  if (moves.length < 4) return null
-  const mid = (since + nowMs) / 2
-  const first  = moves.filter(e => e.timeMs >= since && e.timeMs < mid).length
-  const second = moves.filter(e => e.timeMs >= mid).length
-  if (second > first * 1.4) return '↑'
-  if (first  > second * 1.4) return '↓'
-  return '→'
+type WindowMinutes = 5 | 15 | 30 | 'all'
+
+const WINDOW_LABELS: Record<WindowMinutes, string> = {
+  5:    '5 Min.',
+  15:   '15 Min.',
+  30:   '30 Min.',
+  all:  'Seit Beginn',
 }
 
-/** Generates a live German recap for the chosen time window. */
-function buildLiveSummary(session: SessionData, windowMin: LiveWindow): string {
-  const nowMs = Date.now() - session.startTime.getTime()
-  const since = windowMin !== null ? Math.max(0, nowMs - windowMin * 60_000) : 0
-  const label = windowMin !== null ? `Letzte ${windowMin} Min.` : 'Seit Beginn'
+const WINDOW_OPTIONS: WindowMinutes[] = [5, 15, 30, 'all']
 
-  // Cry events in window
-  const recentCries = session.cryEvents.filter(e => (e.endMs ?? nowMs) >= since)
-  const cryCount    = recentCries.length
-  const cryTotalSec = Math.round(
-    recentCries.reduce((sum, e) => sum + ((e.endMs ?? nowMs) - e.startMs), 0) / 1000
+function filterStatsForWindow(
+  session: SessionData,
+  stats: SessionStats,
+  window: WindowMinutes,
+): SessionStats {
+  if (window === 'all') return stats
+
+  const now      = (session.endTime ?? new Date()).getTime()
+  const cutoffMs = now - window * 60 * 1000
+  const startMs  = session.startTime.getTime()
+
+  // relative cutoff within session
+  const relCutoff = cutoffMs - startMs
+
+  const crysInWindow = session.cryEvents.filter(
+    e => (e.endMs ?? (now - startMs)) >= relCutoff
   )
+  const movesInWindow = session.moveEvents.filter(e => e.timeMs >= relCutoff)
 
-  // Move events in window — with enrichment
-  const recentMoves = session.moveEvents.filter(e => e.timeMs >= since)
-  const moveCount   = recentMoves.length
-  const avgIntensity = moveCount > 0
-    ? Math.round(recentMoves.reduce((s, e) => s + e.intensity, 0) / moveCount)
-    : 0
-  const trend = moveTrend(recentMoves, since, nowMs)
+  const durationSec  = window * 60
+  const cryCount     = crysInWindow.length
+  const cryTotalSec  = Math.round(
+    crysInWindow.reduce((sum, e) => {
+      const start = Math.max(e.startMs, relCutoff)
+      const end   = e.endMs ?? (now - startMs)
+      return sum + Math.max(0, end - start) / 1000
+    }, 0)
+  )
+  const moveCount    = movesInWindow.length
+  const peakCryLevel = crysInWindow.reduce((m, e) => Math.max(m, e.peakLevel), 0)
+  const quietPct     = durationSec > 0 ? Math.round((1 - cryTotalSec / durationSec) * 100) : 100
+  const movePerMin   = moveCount / window
+  const sleepQuality: SessionStats['sleepQuality'] =
+    movePerMin < 1 ? 'deep' : movePerMin < 3 ? 'light' : 'restless'
 
-  // Time since last activity
-  const lastCryEnd = recentCries.length > 0
-    ? Math.max(...recentCries.map(e => e.endMs ?? nowMs)) : null
-  const lastMoveMs = recentMoves.length > 0
-    ? Math.max(...recentMoves.map(e => e.timeMs)) : null
-  const lastActivityMs  = Math.max(lastCryEnd ?? 0, lastMoveMs ?? 0)
-  const silenceSec = lastActivityMs > 0 ? Math.round((nowMs - lastActivityMs) / 1000) : null
-
-  if (cryCount === 0 && moveCount === 0) {
-    if (nowMs < 60_000) return 'Alles ruhig — Session gerade gestartet.'
-    return `Alles ruhig${windowMin !== null ? ` (${label})` : ' seit Beginn'}.`
-  }
-
-  const parts: string[] = []
-  if (cryCount > 0) {
-    parts.push(`${cryCount}× Weinen (${fmtDur(cryTotalSec)})`)
-  }
-  if (moveCount > 0) {
-    // e.g. "8 Bewegungen · Ø 4/10 · ↑"
-    let moveStr = `${moveCount} Bewegung${moveCount !== 1 ? 'en' : ''}`
-    if (avgIntensity > 0) moveStr += ` · Ø ${avgIntensity}/10`
-    if (trend)            moveStr += ` ${trend}`
-    parts.push(moveStr)
-  }
-
-  let tail = ''
-  if (silenceSec !== null && silenceSec > 10) {
-    tail = silenceSec >= 120
-      ? ` · Ruhig seit ${Math.floor(silenceSec / 60)} Min.`
-      : ` · Ruhig seit ${silenceSec} Sek.`
-  }
-
-  return `${label}: ${parts.join(' · ')}${tail}`
+  return { durationSec, cryCount, cryTotalSec, moveCount, peakCryLevel, quietPct, sleepQuality }
 }
 
-export default function AnalysisDashboard({ session, stats, isLive = false, liveStatus = 'offline', videoQuality, audioQuality, showVideoOffBanner = false, onBack }: Props) {
-  const [aiSummary, setAiSummary] = useState<string | null>(null)
-  const [aiLoading, setAiLoading] = useState(false)
+// ── AI analysis call ────────────────────────────────────────────────────────
+
+async function fetchAiAnalysis(session: SessionData, stats: SessionStats, isLive: boolean): Promise<string> {
+  const r = await fetch('/api/analyze', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      durationSec:  stats.durationSec,
+      cryCount:     stats.cryCount,
+      cryTotalSec:  stats.cryTotalSec,
+      moveCount:    stats.moveCount,
+      peakCryLevel: stats.peakCryLevel,
+      sessionCode:  session.sessionCode,
+      isLive,
+    }),
+  })
+  const d = await r.json()
+  return d.analysis ?? 'Analyse konnte nicht geladen werden.'
+}
+
+// ── Component ───────────────────────────────────────────────────────────────
+
+export default function AnalysisDashboard({
+  session, stats, isLive = false, liveStatus = 'offline',
+  liveDetectors, videoQuality, audioQuality,
+  showVideoOffBanner = false, onBack,
+}: Props) {
   const timeline = buildTimeline(session)
 
-  // Time window selector for live recap
-  const [liveWindow, setLiveWindow] = useState<LiveWindow>(5)
+  // Status banner
+  const statusInfo = isLive
+    ? computeLiveStatus(session, stats, liveDetectors, liveStatus)
+    : computePostSessionStatus(session, stats)
 
-  // Live recap — refreshes every 15s so the summary stays current
-  const [liveSummary, setLiveSummary] = useState(() => isLive ? buildLiveSummary(session, 5) : '')
-  const liveSummaryRef = useRef(session)
-  liveSummaryRef.current = session
-  const liveWindowRef = useRef<LiveWindow>(5)
-  liveWindowRef.current = liveWindow
-  useEffect(() => {
-    if (!isLive) return
-    setLiveSummary(buildLiveSummary(liveSummaryRef.current, liveWindowRef.current))
-    const id = setInterval(() => {
-      setLiveSummary(buildLiveSummary(liveSummaryRef.current, liveWindowRef.current))
-    }, 15_000)
-    return () => clearInterval(id)
-  }, [isLive])
+  // AI analysis — available for both live (on demand) and post-session (auto)
+  const [aiSummary, setAiSummary]   = useState<string | null>(null)
+  const [aiLoading, setAiLoading]   = useState(false)
+  const [aiWindow, setAiWindow]     = useState<WindowMinutes>('all')
+  const sessionRef = useRef(session)
+  const statsRef   = useRef(stats)
+  sessionRef.current = session
+  statsRef.current   = stats
 
-  // Rebuild immediately when window changes
-  useEffect(() => {
-    if (!isLive) return
-    setLiveSummary(buildLiveSummary(liveSummaryRef.current, liveWindow))
-  }, [liveWindow, isLive])
-
-  // Only fetch AI summary when session has ended
-  useEffect(() => {
-    if (isLive) return
+  const runAiAnalysis = useCallback((win: WindowMinutes = aiWindow) => {
     setAiLoading(true)
-    fetch('/api/analyze', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        durationSec:  stats.durationSec,
-        cryCount:     stats.cryCount,
-        cryTotalSec:  stats.cryTotalSec,
-        moveCount:    stats.moveCount,
-        peakCryLevel: stats.peakCryLevel,
-        sessionCode:  session.sessionCode,
-      }),
-    })
-      .then(r => r.json())
-      .then(d => setAiSummary(d.analysis ?? null))
+    setAiSummary(null)
+    const filtered = filterStatsForWindow(sessionRef.current, statsRef.current, win)
+    fetchAiAnalysis(sessionRef.current, filtered, isLive)
+      .then(text => setAiSummary(text))
       .catch(() => setAiSummary('KI-Analyse konnte nicht geladen werden.'))
       .finally(() => setAiLoading(false))
-  }, [isLive]) // runs once when component mounts, skipped if isLive
+  }, [isLive, aiWindow])
+
+  // Auto-run after session ends
+  useEffect(() => {
+    if (!isLive) runAiAnalysis('all')
+  }, [isLive]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="screen analysis-screen">
-      {/* Sticky header — 3 columns: back | code (center) | X */}
+      {/* Header: 3 columns */}
       <div className="analysis-header">
-        <button className="analysis-nav-back" onClick={onBack}>
-          {isLive ? '← Zurück' : '← Zurück'}
-        </button>
+        <button className="analysis-nav-back" onClick={onBack}>← Zurück</button>
         <span className="header-session-code">
           Session Code: {session.sessionCode.slice(0,3)} {session.sessionCode.slice(3)}
         </span>
-        <button className="overlay-close-x" onClick={onBack} aria-label="Schließen">
-          ✕
-        </button>
+        <button className="overlay-close-x" onClick={onBack} aria-label="Schließen">✕</button>
       </div>
 
       {/* Video-off banner */}
@@ -199,7 +347,21 @@ export default function AnalysisDashboard({ session, stats, isLive = false, live
 
       <div className="analysis-body">
 
-        {/* ── Overview ─────────────────────────────────────────────── */}
+        {/* ── Jetzt gerade / Session-Fazit ─────────────────────────── */}
+        <div
+          className="status-banner"
+          style={{
+            background: STATUS_COLORS[statusInfo.color].bg,
+            borderColor: STATUS_COLORS[statusInfo.color].border,
+          }}
+        >
+          <p className="status-banner-headline" style={{ color: STATUS_COLORS[statusInfo.color].text }}>
+            {statusInfo.headline}
+          </p>
+          <p className="status-banner-subtitle">{statusInfo.subtitle}</p>
+        </div>
+
+        {/* ── Übersicht ────────────────────────────────────────────── */}
         <div className="o-card">
           <div className="o-card-header">
             <span className="o-card-title">Übersicht</span>
@@ -225,11 +387,12 @@ export default function AnalysisDashboard({ session, stats, isLive = false, live
             )}
             {isLive && videoQuality !== undefined && audioQuality !== undefined && (
               <div className="session-meta-item session-meta-item--badge">
-                <span className="meta-label">Status Übertragung</span>
+                <span className="meta-label">Aktuelle Status Übertragung</span>
                 <ConnectionBadge
                   state={liveStatus === 'full' ? 'connected' : liveStatus === 'partial' ? 'degraded' : 'reconnecting'}
                   videoQuality={videoQuality}
                   audioQuality={audioQuality}
+                  bare
                 />
               </div>
             )}
@@ -249,100 +412,118 @@ export default function AnalysisDashboard({ session, stats, isLive = false, live
                   <div
                     key={i}
                     className={`timeline-segment timeline-segment--${seg.type}`}
-                    style={{ flex: seg.pct }}
-                    title={seg.type}
+                    style={{ width: `${seg.pct}%` }}
                   />
                 ))}
               </div>
               <div className="timeline-legend">
-                <span className="legend-item">
-                  <span className="legend-dot" style={{ background: '#E8EAF0' }} />
-                  Ruhig
-                </span>
-                <span className="legend-item">
-                  <span className="legend-dot" style={{ background: '#FCA5A5' }} />
-                  Weinen
-                </span>
-                <span className="legend-item">
-                  <span className="legend-dot" style={{ background: '#FDE68A' }} />
-                  Bewegung
-                </span>
-                <span className="legend-item">
-                  <span className="legend-dot" style={{ background: '#F97316', opacity: 0.7 }} />
-                  Beides
-                </span>
+                <span className="legend-item"><span className="legend-dot legend-dot--quiet"/>Ruhig</span>
+                <span className="legend-item"><span className="legend-dot legend-dot--cry"/>Weinen</span>
+                <span className="legend-item"><span className="legend-dot legend-dot--move"/>Bewegung</span>
+                <span className="legend-item"><span className="legend-dot legend-dot--both"/>Beides</span>
+                {session.connectionEvents.length > 0 && (
+                  <span className="legend-item"><span className="legend-dot legend-dot--disconnected"/>Verbindung weg</span>
+                )}
               </div>
             </>
           ) : (
-            <p className="empty-state">Noch keine Aktivität aufgezeichnet</p>
+            <p style={{ color: 'var(--text-muted-l)', fontSize: '0.85rem' }}>Noch keine Daten.</p>
           )}
         </div>
 
-        {/* ── Stats grid ───────────────────────────────────────────── */}
-        <div className="stats-grid">
-          <div className="stat-card">
-            <span className="stat-card-icon"><CryIcon size={24} /></span>
-            <span className="stat-card-value">{stats.cryCount}</span>
-            <span className="stat-card-label">Weinphasen</span>
-            {stats.cryTotalSec > 0 && (
-              <span className="stat-card-sub">gesamt {fmtDur(stats.cryTotalSec)}</span>
-            )}
+        {/* ── Stats ────────────────────────────────────────────────── */}
+        <div className="o-card">
+          <div className="o-card-header">
+            <span className="o-card-title">Statistiken</span>
           </div>
-          <div className="stat-card">
-            <span className="stat-card-icon"><MoveIcon size={24} /></span>
-            <span className="stat-card-value">{stats.moveCount}</span>
-            <span className="stat-card-label">Bewegungen</span>
-          </div>
-          <div className="stat-card">
-            <span className="stat-card-icon"><PeakIcon size={24} /></span>
-            <span className="stat-card-value">{stats.peakCryLevel}/10</span>
-            <span className="stat-card-label">Max. Weinintensität</span>
-          </div>
-          <div className="stat-card">
-            <span className="stat-card-icon">😴</span>
-            <span className="stat-card-value">
-              {stats.durationSec > 0
-                ? `${Math.round(100 - (stats.cryTotalSec / stats.durationSec) * 100)}%`
-                : '—'}
-            </span>
-            <span className="stat-card-label">Ruhezeit</span>
+          <div className="stats-grid stats-grid--3">
+
+            {/* Card 1: Weinen — count + duration combined, intensity dots below */}
+            <div className="stat-card">
+              <span className="stat-card-icon"><CryIcon size={24} /></span>
+              <span className="stat-card-value">
+                {stats.cryCount > 0
+                  ? <>{stats.cryCount}× <span className="stat-value-small">· {fmtDur(stats.cryTotalSec)}</span></>
+                  : '–'
+                }
+              </span>
+              <span className="stat-card-label">Weinphasen</span>
+              {stats.peakCryLevel > 0 && (
+                <span className="stat-card-sub">
+                  <IntensityDots level={stats.peakCryLevel} />
+                </span>
+              )}
+            </div>
+
+            {/* Card 2: Schlafqualität — qualitative, move count as sub */}
+            <div className="stat-card">
+              <span className="stat-card-icon">
+                <SleepQualityIcon size={24} level={stats.sleepQuality} />
+              </span>
+              <span className="stat-card-value" style={{
+                fontSize: '1rem',
+                color: stats.sleepQuality === 'deep' ? '#16a34a' : stats.sleepQuality === 'light' ? '#ca8a04' : '#ea580c'
+              }}>
+                {stats.sleepQuality === 'deep' ? 'Tief' : stats.sleepQuality === 'light' ? 'Leicht' : 'Unruhig'}
+              </span>
+              <span className="stat-card-label">Schlafqualität</span>
+              <span className="stat-card-sub">{stats.moveCount} Bewegungen</span>
+            </div>
+
+            {/* Card 3: Ruhezeit % */}
+            <div className="stat-card">
+              <span className="stat-card-icon"><RestIcon size={24} /></span>
+              <span className="stat-card-value">{stats.quietPct}%</span>
+              <span className="stat-card-label">Ruhezeit</span>
+            </div>
+
           </div>
         </div>
 
-        {/* ── AI Summary — only after session ends ─────────────────── */}
+        {/* ── KI-Analyse ───────────────────────────────────────────── */}
         <div className="o-card">
           <div className="o-card-header">
             <span className="o-card-title">KI-Analyse</span>
             <span className="ai-powered-tag">✨ Claude AI</span>
           </div>
-          {isLive ? (
-            <div className="live-recap-wrapper">
-              {/* Window selector */}
-              <div className="window-selector" role="group" aria-label="Zeitraum">
-                {([5, 15, 30, null] as LiveWindow[]).map(w => (
-                  <button
-                    key={String(w)}
-                    className={`window-chip ${liveWindow === w ? 'window-chip--active' : ''}`}
-                    onClick={() => setLiveWindow(w)}
-                  >
-                    {w === null ? 'Seit Beginn' : `${w} Min.`}
-                  </button>
-                ))}
-              </div>
-              <div className="live-recap">
-                <p className="live-recap-text">{liveSummary}</p>
-                <p className="live-recap-hint">
-                  Nach der Session erstellt Claude eine vollständige Analyse.
-                </p>
-              </div>
-            </div>
-          ) : aiLoading ? (
+
+          {/* Time window chips */}
+          <div className="window-chips">
+            {WINDOW_OPTIONS.map(w => (
+              <button
+                key={String(w)}
+                className={`window-chip ${aiWindow === w ? 'window-chip--active' : ''}`}
+                onClick={() => {
+                  setAiWindow(w)
+                  if (aiSummary) runAiAnalysis(w)
+                }}
+              >
+                {WINDOW_LABELS[w]}
+              </button>
+            ))}
+          </div>
+
+          {aiLoading ? (
             <div className="ai-summary-loading">
               <div className="spinner" style={{ width: 20, height: 20, borderWidth: 2 }} />
               Analyse läuft…
             </div>
+          ) : aiSummary ? (
+            <div>
+              <p className="ai-summary-text">{aiSummary}</p>
+              <button className="ai-refresh-btn" onClick={() => runAiAnalysis(aiWindow)}>
+                ↻ {isLive ? 'Jetzt neu analysieren' : 'Erneut analysieren'}
+              </button>
+            </div>
           ) : (
-            <p className="ai-summary-text">{aiSummary}</p>
+            <div className="ai-request-block">
+              <p className="ai-request-hint">
+                Claude analysiert {aiWindow === 'all' ? 'die gesamte Session' : `die letzten ${WINDOW_LABELS[aiWindow]}`} und gibt dir eine verständliche Einschätzung.
+              </p>
+              <button className="ai-analyze-btn" onClick={() => runAiAnalysis(aiWindow)}>
+                ✨ Jetzt analysieren
+              </button>
+            </div>
           )}
         </div>
 
@@ -351,18 +532,16 @@ export default function AnalysisDashboard({ session, stats, isLive = false, live
           <div className="o-card">
             <div className="o-card-header">
               <span className="o-card-title">Weinphasen</span>
-              <span className="o-card-tag">{session.cryEvents.length}×</span>
+              <span className="o-card-tag">{session.cryEvents.length}</span>
             </div>
-            <div className="events-list">
+            <div className="event-list">
               {session.cryEvents.map((e) => (
                 <div className="event-row" key={e.id}>
                   <span className="event-row-icon"><CryIcon size={16} /></span>
                   <span className="event-row-time">{fmtTime(e.startMs, session.startTime)}</span>
-                  <span className="event-row-desc">Intensität {e.peakLevel}/10</span>
+                  <span className="event-row-desc"><IntensityDots level={e.peakLevel} /></span>
                   <span className="event-row-dur">
-                    {e.endMs != null
-                      ? fmtDur(Math.round((e.endMs - e.startMs) / 1000))
-                      : <span style={{ color: '#ef4444' }}>läuft…</span>}
+                    {e.endMs ? fmtDur(Math.round((e.endMs - e.startMs) / 1000)) : 'läuft…'}
                   </span>
                 </div>
               ))}
@@ -375,24 +554,51 @@ export default function AnalysisDashboard({ session, stats, isLive = false, live
           <div className="o-card">
             <div className="o-card-header">
               <span className="o-card-title">Bewegungen</span>
-              <span className="o-card-tag">{session.moveEvents.length}×</span>
+              <span className="o-card-tag">{session.moveEvents.length}</span>
             </div>
-            <div className="events-list">
+            <div className="event-list">
               {session.moveEvents.slice(-10).map((e) => (
                 <div className="event-row" key={e.id}>
                   <span className="event-row-icon"><MoveIcon size={16} /></span>
                   <span className="event-row-time">{fmtTime(e.timeMs, session.startTime)}</span>
-                  <span className="event-row-desc">Intensität {e.intensity}/10</span>
+                  <span className="event-row-desc"><IntensityDots level={e.intensity} /></span>
                 </div>
               ))}
               {session.moveEvents.length > 10 && (
-                <p className="empty-state">+ {session.moveEvents.length - 10} weitere</p>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted-l)', marginTop: 4 }}>
+                  + {session.moveEvents.length - 10} weitere
+                </p>
               )}
             </div>
           </div>
         )}
 
-        <div style={{ height: 32 }} />
+        {/* ── Connection events log ────────────────────────────────── */}
+        {session.connectionEvents.length > 0 && (
+          <div className="o-card">
+            <div className="o-card-header">
+              <span className="o-card-title">Verbindungsunterbrechungen</span>
+              <span className="o-card-tag">{session.connectionEvents.length}</span>
+            </div>
+            <div className="event-list">
+              {session.connectionEvents.map((e) => (
+                <div className="event-row" key={e.id}>
+                  <span className="event-row-icon" style={{ color: '#9ca3af' }}>⚡</span>
+                  <span className="event-row-time">{fmtTime(e.startMs, session.startTime)}</span>
+                  <span className="event-row-desc">
+                    {e.type === 'disconnected' ? 'Verbindung getrennt' : 'Verbindung schwach'}
+                  </span>
+                  <span className="event-row-dur">
+                    {e.endMs
+                      ? fmtDur(Math.round((e.endMs - e.startMs) / 1000))
+                      : 'noch aktiv'}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   )

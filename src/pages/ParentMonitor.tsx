@@ -146,7 +146,7 @@ function ParentRoom({
     (intensity) => recorder.onMove(intensity),
   )
 
-  // ── Alert sounds ─────────────────────────────────────────────────────
+  // ── Alert sounds + connection event recording ─────────────────────────
   const { playWarning, playCritical } = useAlertSound()
   const prevStateRef = useRef(monitorState)
 
@@ -154,9 +154,16 @@ function ParentRoom({
     const prev = prevStateRef.current
     prevStateRef.current = monitorState
     if (prev === monitorState) return
-    if (monitorState === 'critical')          playCritical()
-    else if (monitorState === 'reconnecting') playWarning()
-  }, [monitorState, playCritical, playWarning])
+    if (monitorState === 'critical') {
+      playCritical()
+      recorder.onConnectionLost('disconnected')
+    } else if (monitorState === 'reconnecting') {
+      playWarning()
+      recorder.onConnectionLost('reconnecting')
+    } else if (monitorState === 'connected' || monitorState === 'degraded') {
+      recorder.onConnectionRestored()
+    }
+  }, [monitorState, playCritical, playWarning, recorder])
 
   useEffect(() => {
     const isDisrupted = monitorState === 'critical' || monitorState === 'reconnecting'
@@ -239,11 +246,11 @@ function ParentRoom({
           <div className="parent-bottom-left">
             {moveState.isMoving && (
               <div className="live-indicator live-indicator--move">
-                🏃 Bewegung {moveState.intensity}/10
+                🏃 Bewegt sich
               </div>
             )}
             {cryState.isCrying && (
-              <div className="live-indicator live-indicator--cry">😢 Weinen erkannt</div>
+              <div className="live-indicator live-indicator--cry">😢 Weint gerade</div>
             )}
             <button
               className="analyse-btn"
@@ -299,6 +306,11 @@ function ParentRoom({
               : monitorState === 'degraded'   ? 'partial'
               : 'offline'
             }
+            liveDetectors={{
+              isCrying:      cryState.isCrying,
+              isMoving:      moveState.isMoving,
+              moveIntensity: moveState.intensity,
+            }}
             videoQuality={videoQuality}
             audioQuality={audioQuality}
             showVideoOffBanner={monitorState === 'degraded'}

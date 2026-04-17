@@ -8,6 +8,7 @@ interface Props {
   videoQuality?: QualityLevel   // provided by ParentMonitor; omitted in BabyDevice
   audioQuality?: QualityLevel
   light?:        boolean        // white background variant (on dark video bg)
+  bare?:         boolean        // no pill background at all (on white card)
 }
 
 // Colour for a given quality level
@@ -54,7 +55,7 @@ const STATE_META: Record<MonitorState, { dot: string; pulse: boolean }> = {
   critical:     { dot: '#ef4444', pulse: false },
 }
 
-export default function ConnectionBadge({ state, videoQuality, audioQuality, light = false }: Props) {
+export default function ConnectionBadge({ state, videoQuality, audioQuality, light = false, bare = false }: Props) {
   const { dot, pulse } = STATE_META[state]
 
   // Show full quality rows only when we have quality data (parent monitor, connected)
@@ -73,12 +74,14 @@ export default function ConnectionBadge({ state, videoQuality, audioQuality, lig
   }
 
   return (
-    <div className={`connection-badge ${light ? 'connection-badge--light' : ''}`}>
-      {/* Status dot */}
-      <span
-        className={`badge-dot ${pulse ? 'pulse' : ''}`}
-        style={{ backgroundColor: dot }}
-      />
+    <div className={`connection-badge ${light ? 'connection-badge--light' : ''} ${bare ? 'connection-badge--bare' : ''}`}>
+      {/* Status dot — hidden when quality grid is shown */}
+      {!showQuality && (
+        <span
+          className={`badge-dot ${pulse ? 'pulse' : ''}`}
+          style={{ backgroundColor: dot }}
+        />
+      )}
 
       {showQuality ? (
         /* Quality rows */

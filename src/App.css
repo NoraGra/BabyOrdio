@@ -44,6 +44,7 @@
 
 html, body, #root {
   height: 100%;
+  height: 100dvh;   /* dynamic viewport — respects mobile browser chrome */
   width: 100%;
   overflow: hidden;
   background: var(--bg);
@@ -621,12 +622,12 @@ h1, h2, h3, .headline {
   font-family: 'Inter', sans-serif;
 }
 
-/* Analyse button — white pill, below the badge */
+/* Analyse button — blue pill, white text */
 .analyse-btn {
-  background: #ffffff;
+  background: var(--ordio);
   border: none;
   border-radius: 100px;
-  color: var(--ordio);
+  color: #ffffff;
   font-size: 0.8rem;
   font-weight: 600;
   padding: 6px 12px;
@@ -634,19 +635,19 @@ h1, h2, h3, .headline {
   display: flex;
   align-items: center;
   gap: 5px;
-  transition: background 0.15s;
+  transition: opacity 0.15s;
   white-space: nowrap;
 }
 .analyse-btn:active { opacity: 0.8; }
 
-/* Circular end/close button — white circle with × */
+/* Circular end/close button — blue circle with white × */
 .end-circle-btn {
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  background: #ffffff;
+  background: var(--ordio);
   border: none;
-  color: #111827;
+  color: #ffffff;
   font-size: 1.1rem;
   font-weight: 700;
   cursor: pointer;
@@ -832,6 +833,8 @@ h1, h2, h3, .headline {
   color: var(--text-l);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  /* Use dynamic viewport height so mobile browser chrome doesn't clip */
+  height: 100dvh;
 }
 
 .analysis-header {
@@ -1088,6 +1091,9 @@ h1, h2, h3, .headline {
   grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
+.stats-grid--3 {
+  grid-template-columns: repeat(3, 1fr);
+}
 
 .stat-card {
   background: var(--bg-l);
@@ -1119,6 +1125,102 @@ h1, h2, h3, .headline {
   color: var(--text-muted-l);
 }
 
+.stat-value-small {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--text-muted-l);
+}
+
+/* Intensity dots — neutral gray, no color */
+.intensity-dots {
+  display: inline-flex;
+  gap: 3px;
+  align-items: center;
+}
+.intensity-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(0,0,0,0.2);
+  background: transparent;
+  flex-shrink: 0;
+}
+.intensity-dot--filled {
+  background: #374151;
+  border-color: #374151;
+}
+
+/* Status banner — Jetzt gerade / Session-Fazit */
+.status-banner {
+  border: 1.5px solid;
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.status-banner-headline {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.status-banner-subtitle {
+  font-size: 0.85rem;
+  color: var(--text-muted-l);
+  line-height: 1.4;
+}
+
+/* Bare ConnectionBadge — no pill, just content */
+.connection-badge--bare {
+  background: transparent !important;
+  padding: 0;
+  border-radius: 0;
+}
+
+/* AI analyze on-demand button */
+.ai-request-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ai-request-hint {
+  font-size: 0.85rem;
+  color: var(--text-muted-l);
+  line-height: 1.5;
+}
+.ai-analyze-btn {
+  background: var(--ordio);
+  color: #fff;
+  border: none;
+  border-radius: 100px;
+  padding: 10px 20px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  cursor: pointer;
+  align-self: flex-start;
+  transition: opacity 0.15s;
+}
+.ai-analyze-btn:active { opacity: 0.8; }
+.ai-refresh-btn {
+  background: none;
+  border: 1.5px solid var(--border-l);
+  border-radius: 100px;
+  color: var(--ordio);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 6px 14px;
+  margin-top: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.ai-refresh-btn:active { border-color: var(--ordio); }
+
+/* Timeline disconnected segment */
+.timeline-segment--disconnected { background: #d1d5db; }
+.legend-dot--disconnected { background: #d1d5db; }
+
 /* Time window selector */
 .live-recap-wrapper {
   display: flex;
@@ -1126,10 +1228,12 @@ h1, h2, h3, .headline {
   gap: 10px;
 }
 
-.window-selector {
+.window-selector,
+.window-chips {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+  margin-bottom: 10px;
 }
 
 .window-chip {
@@ -1250,3 +1354,82 @@ h1, h2, h3, .headline {
 }
 .analysis-empty-icon { font-size: 3rem; }
 .analysis-empty h3 { font-family: 'Plus Jakarta Sans', sans-serif; color: var(--text-l); font-size: 1.1rem; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   RESPONSIVE — all screens must be fully visible on every device
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Base fluid tweaks (no breakpoint needed) ───────────────────────── */
+.home-logo-text  { font-size: clamp(2rem, 7vw, 2.8rem); }
+.home-screen     { padding-top: clamp(40px, 10vh, 100px); gap: clamp(24px, 5vh, 48px); }
+.role-card-art   { width: clamp(60px, 16vw, 80px); height: clamp(60px, 16vw, 80px); }
+.analysis-body   { padding: clamp(12px, 3vw, 20px); }
+.o-card          { padding: clamp(14px, 3vw, 20px); }
+
+/* ── Very small phones (≤ 360 px wide — iPhone SE, Galaxy A05…) ──────── */
+@media (max-width: 360px) {
+  .home-cards          { gap: 10px; max-width: 100%; }
+  .role-card           { padding: 16px 8px 14px; gap: 8px; border-radius: 16px; }
+  .role-card-name      { font-size: 0.82rem; }
+  .role-card-desc      { font-size: 0.68rem; }
+
+  .header-session-code { font-size: 0.72rem; letter-spacing: 0.02em; }
+  .analysis-nav-back   { font-size: 0.78rem; }
+
+  .stats-grid          { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stat-card           { padding: 12px 8px; }
+}
+
+/* ── Short screens / landscape phones (≤ 600 px tall) ───────────────── */
+@media (max-height: 600px) {
+  .home-screen {
+    padding-top: clamp(16px, 4vh, 40px);
+    gap: clamp(12px, 2.5vh, 24px);
+    padding-bottom: 20px;
+  }
+  .home-logo-text    { font-size: clamp(1.6rem, 5vw, 2.2rem); }
+  .role-card         { padding: 14px 10px 12px; gap: 8px; }
+  .role-card-art     { width: 56px; height: 56px; }
+  .home-analysis-btn { padding: 8px 18px; font-size: 0.78rem; }
+
+  /* Dashboard: tighten header and cards */
+  .analysis-header   { padding: 10px 16px 0; }
+  .o-card            { padding: 12px 14px; }
+  .o-card-header     { margin-bottom: 10px; }
+  .analysis-body     { gap: 10px; }
+}
+
+/* ── Tablets (≥ 768 px wide) — centre content with max-width ─────────── */
+@media (min-width: 768px) {
+  .home-screen     { padding-top: clamp(80px, 12vh, 120px); }
+  .home-cards      { max-width: 440px; gap: 20px; }
+  .role-card       { padding: 32px 20px 24px; }
+  .role-card-art   { width: 96px; height: 96px; }
+
+  .analysis-body   { padding: 28px 24px; max-width: 640px; }
+  .stats-grid      { grid-template-columns: repeat(4, 1fr); }
+
+  .join-screen     { padding: 60px 40px; }
+  .baby-bottom     { padding: 0 24px 32px; }
+}
+
+/* ── Dashboard header: prevent session code from overflowing ─────────── */
+.header-session-code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+  padding: 0 8px;
+}
+
+/* ── Safe-area insets (iPhone notch / home bar) ─────────────────────── */
+@supports (padding: env(safe-area-inset-bottom)) {
+  .home-screen     { padding-bottom: max(40px, env(safe-area-inset-bottom)); }
+  .analysis-screen { padding-bottom: max(0px, env(safe-area-inset-bottom)); }
+  .parent-bottom-left {
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+  }
+  .baby-overlay    { padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+  .baby-top        { padding-top: max(12px, env(safe-area-inset-top)); }
+  .parent-header   { padding-top: max(16px, env(safe-area-inset-top)); }
+}

@@ -37,7 +37,12 @@ LIVEKIT_URL=wss://your-project.livekit.cloud
 LIVEKIT_API_KEY=APIxxxxxxxxxx
 LIVEKIT_API_SECRET=your-secret-here
 VITE_LIVEKIT_URL=wss://your-project.livekit.cloud
+
+# Optional — enables Claude AI session analysis
+ANTHROPIC_API_KEY=sk-ant-xxxxxxxx
 ```
+
+`ANTHROPIC_API_KEY` is optional. Without it the app works fully — session analysis falls back to a template-based summary. To enable live Claude AI analysis, get a key at [console.anthropic.com](https://console.anthropic.com).
 
 ### 4. Run locally
 
@@ -60,6 +65,7 @@ This uses `vercel dev` which runs both the frontend and the `/api/token` serverl
    - `LIVEKIT_API_KEY`
    - `LIVEKIT_API_SECRET`
    - `VITE_LIVEKIT_URL`
+   - `ANTHROPIC_API_KEY` *(optional — for Claude AI session analysis)*
 4. Deploy. Vercel gives you an HTTPS URL like `https://baby-monitor-xyz.vercel.app`.
 5. Open that URL on two devices — done.
 
@@ -108,3 +114,4 @@ Audio is always prioritised. If the connection degrades, the baby device automat
 - **React + Vite** — frontend
 - **LiveKit** — WebRTC infrastructure (rooms, TURN, reconnection)
 - **Vercel** — hosting + serverless token generation
+- **Claude (Anthropic)** — AI session analysis via `/api/analyze`

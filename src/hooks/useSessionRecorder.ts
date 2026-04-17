@@ -13,12 +13,20 @@ export interface MoveEvent {
   intensity: number // 0–10
 }
 
+export interface ConnectionEvent {
+  id: string
+  startMs: number
+  endMs: number | null
+  type: 'reconnecting' | 'disconnected'
+}
+
 export interface SessionData {
   sessionCode: string
   startTime: Date
   endTime: Date | null
   cryEvents: CryEvent[]
   moveEvents: MoveEvent[]
+  connectionEvents: ConnectionEvent[]
 }
 
 export interface SessionStats {
@@ -27,6 +35,8 @@ export interface SessionStats {
   cryTotalSec: number
   moveCount: number
   peakCryLevel: number
+  quietPct: number              // 0–100: % of session without crying
+  sleepQuality: 'deep' | 'light' | 'restless'
 }
 
 function deriveStats(data: SessionData): SessionStats {
@@ -41,10 +51,18 @@ function deriveStats(data: SessionData): SessionStats {
     }, 0)
   )
 
-  const moveCount = data.moveEvents.length
+  const moveCount    = data.moveEvents.length
   const peakCryLevel = data.cryEvents.reduce((max, e) => Math.max(max, e.peakLevel), 0)
+  const quietPct     = durationSec > 0 ? Math.round((1 - cryTotalSec / durationSec) * 100) : 100
 
-  return { durationSec, cryCount, cryTotalSec, moveCount, peakCryLevel }
+  // Sleep quality based on movement rate (per minute)
+  const movePerMin = durationSec > 0 ? moveCount / (durationSec / 60) : 0
+  const sleepQuality: SessionStats['sleepQuality'] =
+    movePerMin < 1   ? 'deep'
+    : movePerMin < 3 ? 'light'
+    : 'restless'
+
+  return { durationSec, cryCount, cryTotalSec, moveCount, peakCryLevel, quietPct, sleepQuality }
 }
 
 /**
@@ -59,9 +77,11 @@ export function useSessionRecorder(sessionCode: string) {
     endTime: null,
     cryEvents: [],
     moveEvents: [],
+    connectionEvents: [],
   })
 
-  const currentCryRef = useRef<CryEvent | null>(null)
+  const currentCryRef        = useRef<CryEvent | null>(null)
+  const currentConnRef       = useRef<ConnectionEvent | null>(null)
 
   const msSinceStart = useCallback(
     () => Date.now() - startTime.current.getTime(),
@@ -107,6 +127,31 @@ export function useSessionRecorder(sessionCode: string) {
     }))
   }, [msSinceStart])
 
+  /** Call when connection state becomes degraded or worse */
+  const onConnectionLost = useCallback((type: 'reconnecting' | 'disconnected') => {
+    if (currentConnRef.current) return // already open
+    const evt: ConnectionEvent = {
+      id: `conn-${Date.now()}`,
+      startMs: msSinceStart(),
+      endMs: null,
+      type,
+    }
+    currentConnRef.current = evt
+    setData(d => ({ ...d, connectionEvents: [...d.connectionEvents, evt] }))
+  }, [msSinceStart])
+
+  /** Call when connection is restored */
+  const onConnectionRestored = useCallback(() => {
+    if (!currentConnRef.current) return
+    const endMs = msSinceStart()
+    const id = currentConnRef.current.id
+    currentConnRef.current = null
+    setData(d => ({
+      ...d,
+      connectionEvents: d.connectionEvents.map(e => e.id === id ? { ...e, endMs } : e),
+    }))
+  }, [msSinceStart])
+
   /** Call on significant movement (debounced in detector) */
   const onMove = useCallback((intensity: number) => {
     const evt: MoveEvent = {
@@ -130,6 +175,8 @@ export function useSessionRecorder(sessionCode: string) {
     onCryPeak,
     onCryEnd,
     onMove,
+    onConnectionLost,
+    onConnectionRestored,
     finalise,
   }
 }
