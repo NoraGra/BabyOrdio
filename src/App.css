@@ -360,6 +360,11 @@ h1, h2, h3, .headline {
   padding: 6px 12px;
 }
 
+/* White variant — on video background */
+.connection-badge--light {
+  background: rgba(255,255,255,0.92);
+}
+
 .badge-dot {
   width: 8px;
   height: 8px;
@@ -521,6 +526,8 @@ h1, h2, h3, .headline {
 
 .pairing-actions {
   display: flex;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 8px;
   margin-top: 10px;
 }
@@ -576,31 +583,35 @@ h1, h2, h3, .headline {
   inset: 0;
   z-index: 10;
   pointer-events: none;
-  transition: opacity 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
 }
-.controls-visible { opacity: 1; pointer-events: auto; }
-.controls-hidden  { opacity: 0; pointer-events: none; }
+/* All direct children of controls get pointer-events back */
+.parent-controls > * { pointer-events: auto; }
 
 .parent-header {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   padding: 16px;
-  background: linear-gradient(to bottom, rgba(0,0,0,0.65), transparent);
-}
-
-/* Left column: badge + Analyse stacked */
-.parent-header-left {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
+  background: linear-gradient(to bottom, rgba(0,0,0,0.55), transparent);
 }
 
 .parent-header-right {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+/* Bottom-left: live indicators + Analyse button stacked */
+.parent-bottom-left {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 0 16px 20px;
+  background: linear-gradient(to top, rgba(0,0,0,0.5), transparent);
 }
 
 .session-timer {
@@ -663,18 +674,7 @@ h1, h2, h3, .headline {
 .flip-camera-btn:active { opacity: 0.7; }
 .flip-camera-btn:disabled { opacity: 0.4; cursor: default; }
 
-/* Live indicators bottom-right */
-.parent-footer {
-  position: absolute;
-  bottom: 20px;
-  right: 16px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
-  z-index: 10;
-  pointer-events: none;
-}
+/* (parent-footer removed — indicators now live in parent-bottom-left) */
 
 .live-indicator {
   display: flex;
@@ -835,9 +835,9 @@ h1, h2, h3, .headline {
 }
 
 .analysis-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  justify-content: space-between;
   padding: 16px 20px 0;
   background: var(--surface-l);
   border-bottom: 1px solid var(--border-l);
@@ -846,11 +846,7 @@ h1, h2, h3, .headline {
   z-index: 10;
 }
 
-.analysis-header-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
+/* back button sits in grid col 1 — no wrapper needed */
 
 .analysis-title {
   font-family: 'Plus Jakarta Sans', sans-serif;
@@ -910,13 +906,20 @@ h1, h2, h3, .headline {
 
 .video-off-icon { font-size: 1.4rem; flex-shrink: 0; margin-top: 1px; }
 
-/* Code shown in dashboard header — plain blue text, no bubble */
-.header-code {
-  font-size: 0.95rem;
+/* Centered session code in dashboard header */
+.header-session-code {
+  font-size: 0.9rem;
   font-weight: 700;
-  color: var(--ordio);
-  letter-spacing: 0.05em;
+  color: var(--text-l);
+  letter-spacing: 0.04em;
   font-family: 'Plus Jakarta Sans', sans-serif;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* X aligns to the right of its grid cell */
+.analysis-header .overlay-close-x {
+  justify-self: end;
 }
 
 /* Live badge in dashboard header */
@@ -1021,6 +1024,13 @@ h1, h2, h3, .headline {
   gap: 2px;
 }
 
+/* Badge variant — status row with ConnectionBadge inline */
+.session-meta-item--badge {
+  flex-basis: 100%;
+  margin-top: 4px;
+  gap: 6px;
+}
+
 .meta-label {
   font-size: 0.72rem;
   color: var(--text-muted-l);
@@ -1107,6 +1117,39 @@ h1, h2, h3, .headline {
 .stat-card-sub {
   font-size: 0.72rem;
   color: var(--text-muted-l);
+}
+
+/* Time window selector */
+.live-recap-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.window-selector {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.window-chip {
+  background: var(--ordio-light);
+  border: 1.5px solid var(--border-l);
+  border-radius: 100px;
+  color: var(--text-muted-l);
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 4px 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  white-space: nowrap;
+}
+.window-chip:hover { border-color: var(--ordio); color: var(--ordio); }
+.window-chip--active {
+  background: var(--ordio);
+  border-color: var(--ordio);
+  color: #fff;
 }
 
 /* Live recap (shown during active session in place of AI analysis) */

@@ -172,9 +172,6 @@ function BabyRoom({ code, onBack }: { code: string; onBack: () => void }) {
               <p className="code-value">{formattedCode}</p>
               <p className="code-hint">auf dem Eltern-Gerät unter der Baby Ordio URL eingeben</p>
               <div className="pairing-actions">
-                <button className="show-qr-btn" onClick={() => setShowQR(true)}>
-                  Zeige QR Code
-                </button>
                 {typeof navigator.share === 'function' && (
                   <button
                     className="share-code-btn"
@@ -186,9 +183,12 @@ function BabyRoom({ code, onBack }: { code: string; onBack: () => void }) {
                       }).catch(() => {})
                     }
                   >
-                    ↗ Teilen
+                    ↗ Code teilen
                   </button>
                 )}
+                <button className="show-qr-btn" onClick={() => setShowQR(true)}>
+                  Zeige QR Code
+                </button>
               </div>
               <p className="wake-notice">⚠️ Bildschirm aktiv lassen</p>
             </>

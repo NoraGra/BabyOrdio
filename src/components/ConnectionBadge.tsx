@@ -4,9 +4,10 @@ import type { MonitorState } from '../hooks/useMonitorState'
 export type QualityLevel = 0 | 1 | 2 | 3
 
 interface Props {
-  state:        MonitorState
+  state:         MonitorState
   videoQuality?: QualityLevel   // provided by ParentMonitor; omitted in BabyDevice
   audioQuality?: QualityLevel
+  light?:        boolean        // white background variant (on dark video bg)
 }
 
 // Colour for a given quality level
@@ -25,8 +26,9 @@ const Q_LABEL: Record<QualityLevel, string> = {
 }
 
 /** Three signal bars, like cellular reception */
-function SignalBars({ level, color }: { level: QualityLevel; color: string }) {
+function SignalBars({ level, color, light }: { level: QualityLevel; color: string; light?: boolean }) {
   const heights = [7, 11, 15]  // px height for bar 1, 2, 3
+  const emptyColor = light ? 'rgba(0,0,0,0.15)' : 'rgba(255,255,255,0.18)'
   return (
     <div className="signal-bars">
       {heights.map((h, i) => (
@@ -35,7 +37,7 @@ function SignalBars({ level, color }: { level: QualityLevel; color: string }) {
           className="signal-bar"
           style={{
             height: h,
-            background: i < level ? color : 'rgba(255,255,255,0.18)',
+            background: i < level ? color : emptyColor,
           }}
         />
       ))}
@@ -52,7 +54,7 @@ const STATE_META: Record<MonitorState, { dot: string; pulse: boolean }> = {
   critical:     { dot: '#ef4444', pulse: false },
 }
 
-export default function ConnectionBadge({ state, videoQuality, audioQuality }: Props) {
+export default function ConnectionBadge({ state, videoQuality, audioQuality, light = false }: Props) {
   const { dot, pulse } = STATE_META[state]
 
   // Show full quality rows only when we have quality data (parent monitor, connected)
@@ -71,7 +73,7 @@ export default function ConnectionBadge({ state, videoQuality, audioQuality }: P
   }
 
   return (
-    <div className="connection-badge">
+    <div className={`connection-badge ${light ? 'connection-badge--light' : ''}`}>
       {/* Status dot */}
       <span
         className={`badge-dot ${pulse ? 'pulse' : ''}`}
@@ -83,21 +85,21 @@ export default function ConnectionBadge({ state, videoQuality, audioQuality }: P
         <div className="badge-quality-grid">
           {/* Video row */}
           <span className="badge-track-icon">🎥</span>
-          <SignalBars level={videoQuality!} color={Q_COLOUR[videoQuality!]} />
+          <SignalBars level={videoQuality!} color={Q_COLOUR[videoQuality!]} light={light} />
           <span className="badge-quality-label" style={{ color: Q_COLOUR[videoQuality!] }}>
             {Q_LABEL[videoQuality!]}
           </span>
 
           {/* Audio row */}
           <span className="badge-track-icon">🔊</span>
-          <SignalBars level={audioQuality!} color={Q_COLOUR[audioQuality!]} />
+          <SignalBars level={audioQuality!} color={Q_COLOUR[audioQuality!]} light={light} />
           <span className="badge-quality-label" style={{ color: Q_COLOUR[audioQuality!] }}>
             {Q_LABEL[audioQuality!]}
           </span>
         </div>
       ) : (
         /* Simple label for other states */
-        <span className="badge-label" style={{ color: dot }}>
+        <span className="badge-label" style={{ color: light ? dot : dot }}>
           {simpleLabel[state]}
         </span>
       )}

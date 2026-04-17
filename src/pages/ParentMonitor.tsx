@@ -191,30 +191,12 @@ function ParentRoom({
     onBack()
   }, [recorder, onSessionEnd, onBack])
 
-  // ── Controls auto-hide ────────────────────────────────────────────────
-  const [controlsVisible, setControlsVisible] = useState(true)
-  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
-  const showControls = useCallback(() => {
-    setControlsVisible(true)
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
-    hideTimerRef.current = setTimeout(() => setControlsVisible(false), 4000)
-  }, [])
-
-  useEffect(() => {
-    if (monitorState === 'connected') {
-      hideTimerRef.current = setTimeout(() => setControlsVisible(false), 4000)
-    } else {
-      setControlsVisible(true)
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current)
-    }
-    return () => { if (hideTimerRef.current) clearTimeout(hideTimerRef.current) }
-  }, [monitorState])
+  // Controls are always visible — no auto-hide
 
   return (
     <>
       {/* ── Live monitor (always mounted = LiveKit stays connected) ── */}
-      <div className="screen parent-screen" onClick={showControls}>
+      <div className="screen parent-screen">
         {audioRef && isTrackReference(audioRef) && (
           <AudioTrack trackRef={audioRef} />
         )}
@@ -227,23 +209,17 @@ function ParentRoom({
           )}
         </div>
 
-        <div className={`parent-controls ${controlsVisible ? 'controls-visible' : 'controls-hidden'}`}>
+        {/* ── Always-visible overlay controls ── */}
+        <div className="parent-controls">
+
+          {/* TOP: badge (left) + timer + beenden (right) */}
           <div className="parent-header">
-            {/* Left column: badge + Analyse button stacked */}
-            <div className="parent-header-left">
-              <ConnectionBadge
-                state={monitorState}
-                videoQuality={videoQuality}
-                audioQuality={audioQuality}
-              />
-              <button
-                className="analyse-btn"
-                onClick={(e) => { e.stopPropagation(); setShowDashboard(true) }}
-              >
-                📊 Analyse
-              </button>
-            </div>
-            {/* Right: session timer + Beenden circle */}
+            <ConnectionBadge
+              state={monitorState}
+              videoQuality={videoQuality}
+              audioQuality={audioQuality}
+              light
+            />
             <div className="parent-header-right">
               {(monitorState === 'connected' || monitorState === 'degraded') && (
                 <SessionTimer />
@@ -258,17 +234,25 @@ function ParentRoom({
               </button>
             </div>
           </div>
-        </div>
 
-        <div className="parent-footer">
-          {cryState.isCrying && (
-            <div className="live-indicator live-indicator--cry">😢 Weinen erkannt</div>
-          )}
-          {moveState.isMoving && (
-            <div className="live-indicator live-indicator--move">
-              🏃 Bewegung {moveState.intensity}/10
-            </div>
-          )}
+          {/* BOTTOM LEFT: live indicators stacked above Analyse button */}
+          <div className="parent-bottom-left">
+            {moveState.isMoving && (
+              <div className="live-indicator live-indicator--move">
+                🏃 Bewegung {moveState.intensity}/10
+              </div>
+            )}
+            {cryState.isCrying && (
+              <div className="live-indicator live-indicator--cry">😢 Weinen erkannt</div>
+            )}
+            <button
+              className="analyse-btn"
+              onClick={(e) => { e.stopPropagation(); setShowDashboard(true) }}
+            >
+              Analyse
+            </button>
+          </div>
+
         </div>
 
         {summary && <SummaryBanner summary={summary} onDismiss={clearSummary} />}
@@ -315,6 +299,8 @@ function ParentRoom({
               : monitorState === 'degraded'   ? 'partial'
               : 'offline'
             }
+            videoQuality={videoQuality}
+            audioQuality={audioQuality}
             showVideoOffBanner={monitorState === 'degraded'}
             onBack={() => setShowDashboard(false)}
           />

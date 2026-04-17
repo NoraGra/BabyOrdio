@@ -1,5 +1,8 @@
 import { useEffect, useState, useRef } from 'react'
 import type { SessionData, SessionStats } from '../hooks/useSessionRecorder'
+import ConnectionBadge from '../components/ConnectionBadge'
+import type { QualityLevel } from '../components/ConnectionBadge'
+import { CryIcon, MoveIcon, PeakIcon, AudioIcon } from '../components/icons/DashboardIcon'
 
 export type LiveStatus = 'full' | 'partial' | 'offline'
 
@@ -10,6 +13,9 @@ interface Props {
   isLive?: boolean
   /** Connection quality: full = both streams, partial = one, offline = none */
   liveStatus?: LiveStatus
+  /** Per-track quality levels (only when isLive) */
+  videoQuality?: QualityLevel
+  audioQuality?: QualityLevel
   /** Show a top banner: Video inaktiv, Audio läuft weiter */
   showVideoOffBanner?: boolean
   onBack: () => void
@@ -43,37 +49,51 @@ function buildTimeline(session: SessionData) {
   })
 }
 
-/** Generates a live German recap of the last 5 minutes from recorded events. */
-function buildLiveSummary(session: SessionData): string {
+type LiveWindow = 5 | 15 | 30 | null   // null = since start
+
+/** Movement trend: compare activity in first half vs second half of window */
+function moveTrend(moves: SessionData['moveEvents'], since: number, nowMs: number): '↑' | '↓' | '→' | null {
+  if (moves.length < 4) return null
+  const mid = (since + nowMs) / 2
+  const first  = moves.filter(e => e.timeMs >= since && e.timeMs < mid).length
+  const second = moves.filter(e => e.timeMs >= mid).length
+  if (second > first * 1.4) return '↑'
+  if (first  > second * 1.4) return '↓'
+  return '→'
+}
+
+/** Generates a live German recap for the chosen time window. */
+function buildLiveSummary(session: SessionData, windowMin: LiveWindow): string {
   const nowMs = Date.now() - session.startTime.getTime()
-  const windowMs = 5 * 60 * 1000 // last 5 minutes
-  const since = Math.max(0, nowMs - windowMs)
+  const since = windowMin !== null ? Math.max(0, nowMs - windowMin * 60_000) : 0
+  const label = windowMin !== null ? `Letzte ${windowMin} Min.` : 'Seit Beginn'
 
   // Cry events in window
   const recentCries = session.cryEvents.filter(e => (e.endMs ?? nowMs) >= since)
-  const cryCount = recentCries.length
+  const cryCount    = recentCries.length
   const cryTotalSec = Math.round(
     recentCries.reduce((sum, e) => sum + ((e.endMs ?? nowMs) - e.startMs), 0) / 1000
   )
 
-  // Move events in window
+  // Move events in window — with enrichment
   const recentMoves = session.moveEvents.filter(e => e.timeMs >= since)
-  const moveCount = recentMoves.length
+  const moveCount   = recentMoves.length
+  const avgIntensity = moveCount > 0
+    ? Math.round(recentMoves.reduce((s, e) => s + e.intensity, 0) / moveCount)
+    : 0
+  const trend = moveTrend(recentMoves, since, nowMs)
 
-  // Time since last event
+  // Time since last activity
   const lastCryEnd = recentCries.length > 0
-    ? Math.max(...recentCries.map(e => e.endMs ?? nowMs))
-    : null
-  const lastMove = recentMoves.length > 0
-    ? Math.max(...recentMoves.map(e => e.timeMs))
-    : null
-  const lastActivityMs = Math.max(lastCryEnd ?? 0, lastMove ?? 0)
+    ? Math.max(...recentCries.map(e => e.endMs ?? nowMs)) : null
+  const lastMoveMs = recentMoves.length > 0
+    ? Math.max(...recentMoves.map(e => e.timeMs)) : null
+  const lastActivityMs  = Math.max(lastCryEnd ?? 0, lastMoveMs ?? 0)
   const silenceSec = lastActivityMs > 0 ? Math.round((nowMs - lastActivityMs) / 1000) : null
 
   if (cryCount === 0 && moveCount === 0) {
-    const totalSec = Math.round(nowMs / 1000)
-    if (totalSec < 60) return 'Alles ruhig — Session gerade gestartet.'
-    return `Alles ruhig seit ${totalSec >= 120 ? `${Math.floor(totalSec / 60)} Min.` : `${totalSec} Sek.`}`
+    if (nowMs < 60_000) return 'Alles ruhig — Session gerade gestartet.'
+    return `Alles ruhig${windowMin !== null ? ` (${label})` : ' seit Beginn'}.`
   }
 
   const parts: string[] = []
@@ -81,36 +101,51 @@ function buildLiveSummary(session: SessionData): string {
     parts.push(`${cryCount}× Weinen (${fmtDur(cryTotalSec)})`)
   }
   if (moveCount > 0) {
-    parts.push(`${moveCount} Bewegung${moveCount !== 1 ? 'en' : ''}`)
+    // e.g. "8 Bewegungen · Ø 4/10 · ↑"
+    let moveStr = `${moveCount} Bewegung${moveCount !== 1 ? 'en' : ''}`
+    if (avgIntensity > 0) moveStr += ` · Ø ${avgIntensity}/10`
+    if (trend)            moveStr += ` ${trend}`
+    parts.push(moveStr)
   }
 
   let tail = ''
   if (silenceSec !== null && silenceSec > 10) {
     tail = silenceSec >= 120
-      ? ` · Zuletzt ruhig seit ${Math.floor(silenceSec / 60)} Min.`
-      : ` · Zuletzt ruhig seit ${silenceSec} Sek.`
+      ? ` · Ruhig seit ${Math.floor(silenceSec / 60)} Min.`
+      : ` · Ruhig seit ${silenceSec} Sek.`
   }
 
-  return `Letzte 5 Min.: ${parts.join(', ')}${tail}`
+  return `${label}: ${parts.join(' · ')}${tail}`
 }
 
-export default function AnalysisDashboard({ session, stats, isLive = false, liveStatus = 'offline', showVideoOffBanner = false, onBack }: Props) {
+export default function AnalysisDashboard({ session, stats, isLive = false, liveStatus = 'offline', videoQuality, audioQuality, showVideoOffBanner = false, onBack }: Props) {
   const [aiSummary, setAiSummary] = useState<string | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
   const timeline = buildTimeline(session)
 
+  // Time window selector for live recap
+  const [liveWindow, setLiveWindow] = useState<LiveWindow>(5)
+
   // Live recap — refreshes every 15s so the summary stays current
-  const [liveSummary, setLiveSummary] = useState(() => isLive ? buildLiveSummary(session) : '')
+  const [liveSummary, setLiveSummary] = useState(() => isLive ? buildLiveSummary(session, 5) : '')
   const liveSummaryRef = useRef(session)
   liveSummaryRef.current = session
+  const liveWindowRef = useRef<LiveWindow>(5)
+  liveWindowRef.current = liveWindow
   useEffect(() => {
     if (!isLive) return
-    setLiveSummary(buildLiveSummary(liveSummaryRef.current))
+    setLiveSummary(buildLiveSummary(liveSummaryRef.current, liveWindowRef.current))
     const id = setInterval(() => {
-      setLiveSummary(buildLiveSummary(liveSummaryRef.current))
+      setLiveSummary(buildLiveSummary(liveSummaryRef.current, liveWindowRef.current))
     }, 15_000)
     return () => clearInterval(id)
   }, [isLive])
+
+  // Rebuild immediately when window changes
+  useEffect(() => {
+    if (!isLive) return
+    setLiveSummary(buildLiveSummary(liveSummaryRef.current, liveWindow))
+  }, [liveWindow, isLive])
 
   // Only fetch AI summary when session has ended
   useEffect(() => {
@@ -136,36 +171,23 @@ export default function AnalysisDashboard({ session, stats, isLive = false, live
 
   return (
     <div className="screen analysis-screen">
-      {/* Sticky header */}
+      {/* Sticky header — 3 columns: back | code (center) | X */}
       <div className="analysis-header">
-        <div className="analysis-header-left">
-          <button className="analysis-nav-back" onClick={onBack}>
-            {isLive ? '← Zurück zur Übertragung' : '← Zurück zur Auswahl'}
-          </button>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {/* Code — plain blue text, no bubble */}
-          <span className="header-code">
-            {session.sessionCode.slice(0,3)} {session.sessionCode.slice(3)}
-          </span>
-          {/* LIVE badge — green / orange / red */}
-          {isLive && (
-            <span className={`live-badge live-badge--${liveStatus}`}>
-              <span className="live-dot" />
-              {liveStatus === 'offline' ? 'Auf Verbindung warten' : 'LIVE'}
-            </span>
-          )}
-          {/* X — no circle */}
-          <button className="overlay-close-x" onClick={onBack} aria-label="Schließen">
-            ✕
-          </button>
-        </div>
+        <button className="analysis-nav-back" onClick={onBack}>
+          {isLive ? '← Zurück' : '← Zurück'}
+        </button>
+        <span className="header-session-code">
+          Session Code: {session.sessionCode.slice(0,3)} {session.sessionCode.slice(3)}
+        </span>
+        <button className="overlay-close-x" onClick={onBack} aria-label="Schließen">
+          ✕
+        </button>
       </div>
 
       {/* Video-off banner */}
       {showVideoOffBanner && (
         <div className="video-off-banner">
-          <span className="video-off-icon">🔊</span>
+          <span className="video-off-icon"><AudioIcon size={22} /></span>
           <div>
             <strong>Video inaktiv</strong> — Audio läuft weiter
             <div style={{ fontSize: '0.75rem', opacity: 0.85, marginTop: 2 }}>
@@ -181,7 +203,6 @@ export default function AnalysisDashboard({ session, stats, isLive = false, live
         <div className="o-card">
           <div className="o-card-header">
             <span className="o-card-title">Übersicht</span>
-            <span className="o-card-tag">Session</span>
           </div>
           <div className="session-meta">
             <div className="session-meta-item">
@@ -202,12 +223,14 @@ export default function AnalysisDashboard({ session, stats, isLive = false, live
                 </span>
               </div>
             )}
-            {isLive && (
-              <div className="session-meta-item">
-                <span className="meta-label">Status</span>
-                <span className="meta-value" style={{ color: '#22c55e', fontSize: '0.95rem' }}>
-                  ● Aktiv
-                </span>
+            {isLive && videoQuality !== undefined && audioQuality !== undefined && (
+              <div className="session-meta-item session-meta-item--badge">
+                <span className="meta-label">Status Übertragung</span>
+                <ConnectionBadge
+                  state={liveStatus === 'full' ? 'connected' : liveStatus === 'partial' ? 'degraded' : 'reconnecting'}
+                  videoQuality={videoQuality}
+                  audioQuality={audioQuality}
+                />
               </div>
             )}
           </div>
@@ -258,7 +281,7 @@ export default function AnalysisDashboard({ session, stats, isLive = false, live
         {/* ── Stats grid ───────────────────────────────────────────── */}
         <div className="stats-grid">
           <div className="stat-card">
-            <span className="stat-card-icon">😢</span>
+            <span className="stat-card-icon"><CryIcon size={24} /></span>
             <span className="stat-card-value">{stats.cryCount}</span>
             <span className="stat-card-label">Weinphasen</span>
             {stats.cryTotalSec > 0 && (
@@ -266,12 +289,12 @@ export default function AnalysisDashboard({ session, stats, isLive = false, live
             )}
           </div>
           <div className="stat-card">
-            <span className="stat-card-icon">🏃</span>
+            <span className="stat-card-icon"><MoveIcon size={24} /></span>
             <span className="stat-card-value">{stats.moveCount}</span>
             <span className="stat-card-label">Bewegungen</span>
           </div>
           <div className="stat-card">
-            <span className="stat-card-icon">📈</span>
+            <span className="stat-card-icon"><PeakIcon size={24} /></span>
             <span className="stat-card-value">{stats.peakCryLevel}/10</span>
             <span className="stat-card-label">Max. Weinintensität</span>
           </div>
@@ -293,11 +316,25 @@ export default function AnalysisDashboard({ session, stats, isLive = false, live
             <span className="ai-powered-tag">✨ Claude AI</span>
           </div>
           {isLive ? (
-            <div className="live-recap">
-              <p className="live-recap-text">{liveSummary}</p>
-              <p className="live-recap-hint">
-                Nach der Session erstellt Claude eine vollständige Analyse.
-              </p>
+            <div className="live-recap-wrapper">
+              {/* Window selector */}
+              <div className="window-selector" role="group" aria-label="Zeitraum">
+                {([5, 15, 30, null] as LiveWindow[]).map(w => (
+                  <button
+                    key={String(w)}
+                    className={`window-chip ${liveWindow === w ? 'window-chip--active' : ''}`}
+                    onClick={() => setLiveWindow(w)}
+                  >
+                    {w === null ? 'Seit Beginn' : `${w} Min.`}
+                  </button>
+                ))}
+              </div>
+              <div className="live-recap">
+                <p className="live-recap-text">{liveSummary}</p>
+                <p className="live-recap-hint">
+                  Nach der Session erstellt Claude eine vollständige Analyse.
+                </p>
+              </div>
             </div>
           ) : aiLoading ? (
             <div className="ai-summary-loading">
@@ -319,7 +356,7 @@ export default function AnalysisDashboard({ session, stats, isLive = false, live
             <div className="events-list">
               {session.cryEvents.map((e) => (
                 <div className="event-row" key={e.id}>
-                  <span className="event-row-icon">😢</span>
+                  <span className="event-row-icon"><CryIcon size={16} /></span>
                   <span className="event-row-time">{fmtTime(e.startMs, session.startTime)}</span>
                   <span className="event-row-desc">Intensität {e.peakLevel}/10</span>
                   <span className="event-row-dur">
@@ -343,7 +380,7 @@ export default function AnalysisDashboard({ session, stats, isLive = false, live
             <div className="events-list">
               {session.moveEvents.slice(-10).map((e) => (
                 <div className="event-row" key={e.id}>
-                  <span className="event-row-icon">🏃</span>
+                  <span className="event-row-icon"><MoveIcon size={16} /></span>
                   <span className="event-row-time">{fmtTime(e.timeMs, session.startTime)}</span>
                   <span className="event-row-desc">Intensität {e.intensity}/10</span>
                 </div>
