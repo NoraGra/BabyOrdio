@@ -68,6 +68,12 @@ function BabyRoom({ code, onBack }: { code: string; onBack: () => void }) {
   const connectionState = useConnectionState()
   const [showQR, setShowQR] = useState(false)
   const [isSwitchingCamera, setIsSwitchingCamera] = useState(false)
+  // Pairing info collapses after 60 s into a small "Verbinden" button
+  const [pairingExpanded, setPairingExpanded] = useState(true)
+  useEffect(() => {
+    const id = setTimeout(() => setPairingExpanded(false), 60_000)
+    return () => clearTimeout(id)
+  }, [])
   useWakeLock()
 
   const qrUrl = `${window.location.origin}/?code=${code}`
@@ -139,7 +145,7 @@ function BabyRoom({ code, onBack }: { code: string; onBack: () => void }) {
           </div>
         </div>
 
-        {/* Bottom: code + QR toggle */}
+        {/* Bottom: code + QR — expands for 1 min, then collapses to "Verbinden" */}
         <div className="baby-bottom">
           {showQR ? (
             <div className="qr-container" onClick={() => setShowQR(false)}>
@@ -150,17 +156,25 @@ function BabyRoom({ code, onBack }: { code: string; onBack: () => void }) {
                 fgColor="#ffffff"
                 level="M"
               />
-              <p className="qr-hint">Tap to close</p>
+              <p className="qr-hint">Tippen zum Schließen</p>
             </div>
-          ) : (
+          ) : pairingExpanded ? (
             <>
               <p className="code-label">Pairing Code</p>
-              <p className="code-value" onClick={() => setShowQR(true)}>
-                {formattedCode}
-              </p>
-              <p className="code-tap-hint">Tap code to show QR</p>
+              <p className="code-value">{formattedCode}</p>
+              <button className="show-qr-btn" onClick={() => setShowQR(true)}>
+                Zeige QR Code
+              </button>
               <p className="wake-notice">⚠️ Keep this screen on</p>
             </>
+          ) : (
+            /* Collapsed state: single small button */
+            <button
+              className="connect-collapsed-btn"
+              onClick={() => { setPairingExpanded(true); setShowQR(true) }}
+            >
+              Verbinden
+            </button>
           )}
         </div>
       </div>

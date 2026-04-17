@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
     "@livekit/components-react": "^2.6.0",
     "livekit-client": "^2.5.0",
     "livekit-server-sdk": "^2.7.0",
