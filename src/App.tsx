@@ -10,8 +10,18 @@ type Screen =
   | { view: 'parent-join' }
   | { view: 'parent-monitor'; code: string }
 
+// If the URL has ?code=XXXXXX (from a QR scan), jump straight to monitoring
+function getInitialScreen(): Screen {
+  const params = new URLSearchParams(window.location.search)
+  const code = params.get('code')
+  if (code && /^\d{6}$/.test(code)) {
+    return { view: 'parent-monitor', code }
+  }
+  return { view: 'home' }
+}
+
 export default function App() {
-  const [screen, setScreen] = useState<Screen>({ view: 'home' })
+  const [screen, setScreen] = useState<Screen>(getInitialScreen)
 
   if (screen.view === 'home') {
     return (

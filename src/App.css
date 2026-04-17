@@ -288,18 +288,85 @@ html, body, #root {
   margin-top: 4px;
 }
 
+.code-tap-hint {
+  font-size: 0.7rem;
+  color: rgba(255,255,255,0.35);
+  margin-top: 2px;
+}
+
+/* ─── Camera flip button ─────────────────────────────────────────────── */
+.baby-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon-btn {
+  background: rgba(0,0,0,0.5);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-size: 1.1rem;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.icon-btn:disabled { opacity: 0.4; }
+.icon-btn:active { opacity: 0.6; }
+
+/* ─── QR code overlay ────────────────────────────────────────────────── */
+.qr-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  background: rgba(0,0,0,0.85);
+  border-radius: var(--radius);
+  padding: 20px;
+  cursor: pointer;
+}
+
+.qr-hint {
+  font-size: 0.75rem;
+  color: rgba(255,255,255,0.5);
+}
+
 /* ─── PARENT screen ──────────────────────────────────────────────────── */
-.parent-screen { position: fixed; inset: 0; background: #000; }
+.parent-screen { position: fixed; inset: 0; background: #000; cursor: pointer; }
+
+/* Controls overlay — fades in/out on tap */
+.parent-controls {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+.controls-visible { opacity: 1; pointer-events: auto; }
+.controls-hidden  { opacity: 0; pointer-events: none; }
 
 .parent-header {
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  z-index: 10;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 16px;
+  padding: 16px;
   background: linear-gradient(to bottom, rgba(0,0,0,0.6), transparent);
+}
+
+/* Degraded banner */
+.degraded-banner {
+  position: absolute;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 15;
+  background: rgba(249, 115, 22, 0.9);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: 100px;
+  white-space: nowrap;
 }
 
 .parent-header-right {
