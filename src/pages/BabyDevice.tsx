@@ -17,7 +17,6 @@ import { useToken } from '../hooks/useToken'
 import { useWakeLock } from '../hooks/useWakeLock'
 import ConnectionBadge from '../components/ConnectionBadge'
 import HelpButton from '../components/HelpButton'
-import BabyDeviceP2P from './BabyDeviceP2P'
 import type { MonitorState } from '../hooks/useMonitorState'
 
 const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL as string
@@ -25,29 +24,9 @@ const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL as string
 interface Props {
   code: string
   onBack: () => void
-  transport?: 'p2p' | 'livekit'
 }
 
-export default function BabyDevice({ code, onBack, transport = 'p2p' }: Props) {
-  const [mode, setMode] = useState<'p2p' | 'livekit'>(transport)
-
-  // P2P mode — native WebRTC, no LiveKit
-  if (mode === 'p2p') {
-    return (
-      <BabyDeviceP2P
-        code={code}
-        onBack={onBack}
-        onSwitchToLiveKit={() => setMode('livekit')}
-      />
-    )
-  }
-
-  // LiveKit mode — original implementation
-  return <LiveKitBabyDevice code={code} onBack={onBack} />
-}
-
-// ── LiveKit baby device (original, unchanged) ─────────────────────────────
-function LiveKitBabyDevice({ code, onBack }: { code: string; onBack: () => void }) {
+export default function BabyDevice({ code, onBack }: Props) {
   const tokenState = useToken(code, 'baby')
 
   if (!LIVEKIT_URL) {

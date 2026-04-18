@@ -36,8 +36,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   at.addGrant({
     roomJoin: true,
     room,
-    // Baby publishes camera + mic; parent publishes mic only (talk-to-baby)
+    // Baby publishes audio + video; parent can subscribe + publish microphone (talk-to-baby)
     canPublish: true,
+    // 'camera' | 'microphone' are the LiveKit track source string identifiers
+    canPublishSources: role === 'baby'
+      ? ['camera', 'microphone']
+      : ['microphone'],
     canSubscribe: true,
     canPublishData: false,
   })
