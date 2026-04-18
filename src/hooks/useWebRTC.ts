@@ -41,16 +41,17 @@ export interface WebRTCResult {
 }
 
 interface Options {
-  code:        string
-  role:        'baby' | 'parent'
-  localStream: MediaStream | null
-  enabled?:    boolean
+  code:          string
+  role:          'baby' | 'parent'
+  localStream:   MediaStream | null
+  enabled?:      boolean
+  onModeSwitch?: (mode: 'livekit') => void  // baby: called when parent requests LiveKit
 }
 
 // ── Signal helpers ────────────────────────────────────────────────────────
 const POLL_MS = 600
 
-async function postSignal(code: string, type: string, data: unknown) {
+export async function postSignal(code: string, type: string, data: unknown) {
   try {
     await fetch('/api/signal', {
       method:  'POST',
@@ -73,7 +74,7 @@ async function getSignal(code: string) {
 }
 
 // ── Hook ──────────────────────────────────────────────────────────────────
-export function useWebRTC({ code, role, localStream, enabled = true }: Options): WebRTCResult {
+export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitch }: Options): WebRTCResult {
   const [status,       setStatus]       = useState<WebRTCStatus>('idle')
   const [transport,    setTransport]    = useState<WebRTCTransport>('unknown')
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
@@ -207,6 +208,12 @@ export function useWebRTC({ code, role, localStream, enabled = true }: Options):
         } catch (e) { console.error('[P2P] answer error', e) }
       }
 
+      // Baby: detect mode switch requested by parent
+      if (role === 'baby' && s.mode === 'livekit' && onModeSwitch) {
+        onModeSwitch('livekit')
+        return   // stop further P2P processing
+      }
+
       // Baby: receive answer
       if (role === 'baby' && s.answer && !remoteDescSetRef.current) {
         try {
@@ -244,7 +251,7 @@ export function useWebRTC({ code, role, localStream, enabled = true }: Options):
       stopPolling()
       pc.close()
     }
-  }, [code, role, localStream, enabled, stopPolling])
+  }, [code, role, localStream, enabled, onModeSwitch, stopPolling])
 
   return { status, transport, remoteStream, disconnect }
 }

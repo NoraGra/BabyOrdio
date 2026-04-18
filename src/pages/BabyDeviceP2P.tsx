@@ -70,8 +70,11 @@ export default function BabyDeviceP2P({ code, onBack, onSwitchToLiveKit }: Props
   }, [])
 
   // ── P2P connection ──────────────────────────────────────────────────────
+  // onModeSwitch: called when parent writes mode='livekit' to KV → baby follows
+  // (no need to call disconnect() — unmounting BabyDeviceP2P cleans up via useEffect)
   const { status, transport, disconnect } = useWebRTC({
     code, role: 'baby', localStream,
+    onModeSwitch: () => onSwitchToLiveKit(),
   })
 
   // ── Flip camera ─────────────────────────────────────────────────────────

@@ -6,7 +6,7 @@
  * User can switch to LiveKit mode with full analysis features.
  */
 import { useEffect, useState, useRef, useCallback } from 'react'
-import { useWebRTC } from '../hooks/useWebRTC'
+import { useWebRTC, postSignal } from '../hooks/useWebRTC'
 import ConnectionBadge from '../components/ConnectionBadge'
 import SessionTimer from '../components/SessionTimer'
 import HelpButton from '../components/HelpButton'
@@ -71,7 +71,9 @@ export default function ParentMonitorP2P({ code, onBack, onSwitchToLiveKit }: Pr
   }, [])
 
   const handleEnd = () => { disconnect(); onBack() }
-  const handleSwitchToLiveKit = () => {
+  const handleSwitchToLiveKit = async () => {
+    // Tell the baby device to also switch to LiveKit (it polls KV every 600ms)
+    await postSignal(code, 'mode', 'livekit')
     disconnect()
     onSwitchToLiveKit()
   }

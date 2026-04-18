@@ -31,6 +31,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ── GET: return full signal state ──────────────────────────────────────
   if (req.method === 'GET') {
+    // Disable all caching — polling MUST see fresh KV data every request
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
+    res.setHeader('Pragma', 'no-cache')
     const state = (await kv.get<SignalState>(key)) ?? fresh()
     return res.status(200).json(state)
   }
