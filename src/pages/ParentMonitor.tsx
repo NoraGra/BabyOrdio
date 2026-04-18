@@ -27,6 +27,7 @@ import AudioOnlyView      from '../components/AudioOnlyView'
 import SummaryBanner      from '../components/SummaryBanner'
 import HelpButton         from '../components/HelpButton'
 import AnalysisDashboard  from './AnalysisDashboard'
+import ParentMonitorP2P   from './ParentMonitorP2P'
 
 const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL as string
 
@@ -34,9 +35,29 @@ interface Props {
   code: string
   onBack: () => void
   onSessionEnd: (data: SessionData, stats: SessionStats) => void
+  transport?: 'p2p' | 'livekit'
 }
 
-export default function ParentMonitor({ code, onBack, onSessionEnd }: Props) {
+export default function ParentMonitor({ code, onBack, onSessionEnd, transport = 'p2p' }: Props) {
+  const [mode, setMode] = useState<'p2p' | 'livekit'>(transport)
+
+  // P2P mode — native WebRTC, no LiveKit
+  if (mode === 'p2p') {
+    return (
+      <ParentMonitorP2P
+        code={code}
+        onBack={onBack}
+        onSwitchToLiveKit={() => setMode('livekit')}
+      />
+    )
+  }
+
+  // LiveKit mode — original implementation with full analysis
+  return <LiveKitParentMonitor code={code} onBack={onBack} onSessionEnd={onSessionEnd} />
+}
+
+// ── LiveKit parent monitor (original, unchanged) ──────────────────────────
+function LiveKitParentMonitor({ code, onBack, onSessionEnd }: Omit<Props, 'transport'>) {
   const tokenState = useToken(code, 'parent')
 
   if (!LIVEKIT_URL) {
@@ -66,7 +87,7 @@ export default function ParentMonitor({ code, onBack, onSessionEnd }: Props) {
       serverUrl={LIVEKIT_URL}
       token={tokenState.token}
       connect
-      audio={false}  /* mic starts muted; toggled on demand via speak button */
+      audio={false}
       video={false}
       onDisconnected={onBack}
     >
