@@ -8,11 +8,10 @@ interface Props {
 
 export default function ParentJoin({ onJoin, onBack }: Props) {
   const [code, setCode] = useState('')
-  // 8-char alphanumeric (lowercase letters + digits)
-  const isValid = /^[a-z0-9]{8}$/.test(code)
+  const isValid = /^\d{6}$/.test(code)
 
   const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setCode(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8))
+    setCode(e.target.value.replace(/\D/g, '').slice(0, 6))
   }
 
   const handleSubmit = (e: React.FormEvent) => {
