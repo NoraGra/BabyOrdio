@@ -110,8 +110,8 @@ export function useWebRTC({ code, role, localStream, enabled = true }: Options):
     babyIceIdxRef.current  = 0
     parentIceIdxRef.current = 0
 
-    // Reset signal state in KV so stale data doesn't confuse new session
-    postSignal(code, 'reset', null)
+    // Only baby resets — parent must NOT clear the offer baby already wrote
+    if (role === 'baby') postSignal(code, 'reset', null)
 
     const stream = new MediaStream()
     setRemoteStream(stream)
