@@ -4,9 +4,10 @@ interface Props {
   onDone: () => void
 }
 
+// Total: 2s logo hold + 2.7s animation = 4.7s
 export default function IntroOverlay({ onDone }: Props) {
   useEffect(() => {
-    const t = setTimeout(onDone, 2700)
+    const t = setTimeout(onDone, 4900)
     return () => clearTimeout(t)
   }, [onDone])
 
@@ -17,6 +18,7 @@ export default function IntroOverlay({ onDone }: Props) {
           <span className="intro-logo-baby">baby</span>
           <span className="intro-logo-ordio">ordio</span>
         </p>
+        <p className="intro-tagline">Ganz nah bei deinem Baby</p>
       </div>
       <div className="intro-circle" />
     </div>

@@ -27,7 +27,7 @@ export default function HelpButton({ screen, large = false }: Props) {
           aria-hidden
         >
           <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-          <circle cx="12" cy="17" r="0.4" fill="currentColor" stroke="none" />
+          <circle cx="12" cy="17" r="0.4" fill="#ffffff" stroke="none" />
         </svg>
       </button>
 
