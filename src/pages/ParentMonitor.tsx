@@ -172,10 +172,15 @@ function ParentRoom({
   const p2pSwitchedRef = useRef(false)
   const [p2pActive, setP2pActive] = useState(false)
 
-  // Attach P2P stream to video element
+  // Attach P2P stream to video element.
+  // Called every time p2pRemoteStream changes reference (which happens on each
+  // ontrack event — new MediaStream is created each time). The explicit play()
+  // call is required on iOS Safari for WebRTC streams to start rendering.
   useEffect(() => {
-    if (p2pVideoRef.current && p2pRemoteStream) {
-      p2pVideoRef.current.srcObject = p2pRemoteStream
+    if (!p2pVideoRef.current || !p2pRemoteStream) return
+    p2pVideoRef.current.srcObject = p2pRemoteStream
+    if (p2pRemoteStream.getTracks().length > 0) {
+      p2pVideoRef.current.play().catch(() => {})
     }
   }, [p2pRemoteStream])
 
@@ -194,18 +199,20 @@ function ParentRoom({
   // Primary trigger: onCanPlay (cleanest — video is provably rendering)
   const handleP2PCanPlay = useCallback(() => doSwitch(), [doSwitch])
 
-  // Fallback trigger: p2pStatus = 'connected' + 1.5 s delay
-  // Needed because some browsers don't fire canplay when tracks are added
-  // to a MediaStream that's already set as srcObject.
+  // Fallback trigger: p2pStatus = 'connected' + tracks present + delay
+  // Waits up to 5 s for onCanPlay; only switches if the remote stream
+  // actually has tracks (guards against switching to a black screen).
   useEffect(() => {
     if (p2pStatus !== 'connected' || p2pSwitchedRef.current) return
-    // Re-set srcObject + force play so the video element wakes up
-    if (p2pVideoRef.current && p2pRemoteStream) {
-      p2pVideoRef.current.srcObject = p2pRemoteStream
-      p2pVideoRef.current.play().catch(() => {})
-    }
-    // Give onCanPlay 1.5 s to fire; if it hasn't, switch anyway
-    const id = setTimeout(() => doSwitch(), 1500)
+
+    const id = setTimeout(() => {
+      // Don't switch if no tracks yet — stay on LiveKit
+      if (!p2pRemoteStream || p2pRemoteStream.getTracks().length === 0) {
+        console.warn('[P2P] connected but no tracks after 5s — staying on LiveKit')
+        return
+      }
+      doSwitch()
+    }, 5000)
     return () => clearTimeout(id)
   }, [p2pStatus, p2pRemoteStream, doSwitch])
 
@@ -415,6 +422,23 @@ function ParentRoom({
               </button>
             </div>
           </div>
+
+          {/* P2P status chip — visible when negotiating, disappears once connected */}
+          {!p2pActive && p2pStatus !== 'idle' && p2pStatus !== 'connected' && (
+            <div style={{
+              position: 'absolute', bottom: 80, left: '50%', transform: 'translateX(-50%)',
+              background: 'rgba(0,0,0,0.55)', borderRadius: 8, padding: '4px 12px',
+              fontSize: '0.7rem', color: 'rgba(255,255,255,0.5)', pointerEvents: 'none',
+              backdropFilter: 'blur(4px)',
+            }}>
+              Direkt: {
+                p2pStatus === 'signaling'   ? 'Aushandlung…' :
+                p2pStatus === 'connecting'  ? 'ICE läuft…' :
+                p2pStatus === 'reconnecting'? 'Verbinde neu…' :
+                p2pStatus === 'failed'      ? 'fehlgeschlagen' : p2pStatus
+              }
+            </div>
+          )}
 
           {/* BOTTOM LEFT: live indicators + action buttons */}
           <div className="parent-bottom-left">

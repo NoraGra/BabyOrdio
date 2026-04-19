@@ -22,8 +22,19 @@ const ICE_SERVERS: RTCIceServer[] = [
     ],
   },
   { urls: 'stun:stun.cloudflare.com:3478' },
+  // Free public TURN relay — used automatically if direct ICE fails
+  // (covers mDNS resolution failures, AP isolation, strict firewalls)
+  {
+    urls: [
+      'turn:openrelay.metered.ca:80',
+      'turn:openrelay.metered.ca:443',
+      'turns:openrelay.metered.ca:443',
+    ],
+    username:   'openrelayproject',
+    credential: 'openrelayproject',
+  },
 ]
-// Optional TURN via env (set VITE_TURN_URL, VITE_TURN_USERNAME, VITE_TURN_CREDENTIAL)
+// Optional custom TURN via env (set VITE_TURN_URL, VITE_TURN_USERNAME, VITE_TURN_CREDENTIAL)
 const turnUrl = import.meta.env.VITE_TURN_URL as string | undefined
 if (turnUrl) {
   ICE_SERVERS.push({
@@ -142,8 +153,7 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
     babyIceIdxRef.current     = 0
     parentIceIdxRef.current   = 0
 
-    const stream = new MediaStream()
-    setRemoteStream(stream)
+    setRemoteStream(null)   // clear any previous stream
     setStatus('signaling')
     setTransport('unknown')
 
@@ -163,21 +173,31 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
     }
 
     // ── Receive remote tracks ─────────────────────────────────────────
-    // NOTE: ev.streams[0] can be undefined in Unified Plan (modern Chrome/Firefox).
-    // Always add ev.track directly as the reliable fallback path.
+    // IMPORTANT: We create a NEW MediaStream reference each time ontrack fires.
+    // This is required on iOS Safari — mutating an existing MediaStream that is
+    // already set as srcObject does NOT trigger the video element to update.
+    // A new reference causes React to re-run useEffect([remoteStream]) which
+    // re-assigns srcObject and calls play(), reliably waking up the video on iOS.
+    const receivedTracks: MediaStreamTrack[] = []
+
     pc.ontrack = (ev) => {
       LOG('ontrack:', ev.track.kind, 'streams:', ev.streams.length)
-      const addIfMissing = (t: MediaStreamTrack) => {
-        if (!stream.getTracks().includes(t)) {
-          stream.addTrack(t)
-          LOG('added track to remoteStream:', t.kind)
+
+      const addTrack = (t: MediaStreamTrack) => {
+        if (!receivedTracks.find(x => x.id === t.id)) {
+          receivedTracks.push(t)
+          LOG('track added:', t.kind, '— total tracks:', receivedTracks.length)
         }
       }
+
       if (ev.streams.length > 0) {
-        ev.streams[0].getTracks().forEach(addIfMissing)
+        ev.streams[0].getTracks().forEach(addTrack)
       } else {
-        addIfMissing(ev.track)
+        addTrack(ev.track)
       }
+
+      // New MediaStream reference → triggers React re-render → re-sets srcObject
+      setRemoteStream(new MediaStream(receivedTracks))
     }
 
     // ── ICE state machine ─────────────────────────────────────────────
@@ -335,6 +355,7 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
       if (gatheringTimer) clearTimeout(gatheringTimer)
       stopPolling()
       pc.close()
+      setRemoteStream(null)
     }
   }, [code, role, localStream, enabled, stopPolling])  // eslint-disable-line react-hooks/exhaustive-deps
 

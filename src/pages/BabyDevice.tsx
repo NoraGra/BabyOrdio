@@ -256,7 +256,9 @@ function BabyRoom({ code, onBack, camStream, p2pStatus }: LiveKitProps) {
 
   // ── Attach camera stream to local preview ────────────────────────────
   useEffect(() => {
-    if (videoRef.current) videoRef.current.srcObject = camStream
+    if (!videoRef.current) return
+    videoRef.current.srcObject = camStream
+    videoRef.current.play().catch(() => {})
   }, [camStream])
 
   // ── Collapse pairing after 60s ───────────────────────────────────────

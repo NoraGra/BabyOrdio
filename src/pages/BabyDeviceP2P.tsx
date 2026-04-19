@@ -91,8 +91,12 @@ export default function BabyDeviceP2P({
   }, [])  // eslint-disable-line react-hooks/exhaustive-deps -- initialStream is stable
 
   // ── Attach stream to <video> preview ───────────────────────────────────
+  // Explicit play() needed on iOS Safari — muted autoPlay alone is not always
+  // sufficient when srcObject is assigned programmatically after mount.
   useEffect(() => {
-    if (videoRef.current && localStream) videoRef.current.srcObject = localStream
+    if (!videoRef.current || !localStream) return
+    videoRef.current.srcObject = localStream
+    videoRef.current.play().catch(() => {})
   }, [localStream])
 
   // ── Collapse pairing after 60s ──────────────────────────────────────────
