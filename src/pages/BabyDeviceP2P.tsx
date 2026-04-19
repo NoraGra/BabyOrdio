@@ -12,7 +12,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useWakeLock } from '../hooks/useWakeLock'
-import { useWebRTC } from '../hooks/useWebRTC'
+import { useWebRTC, postSignal } from '../hooks/useWebRTC'
 import type { WebRTCStatus, WebRTCTransport } from '../hooks/useWebRTC'
 import ConnectionBadge from '../components/ConnectionBadge'
 import ModeBadge from '../components/ModeBadge'
@@ -22,7 +22,6 @@ import type { MonitorState } from '../hooks/useMonitorState'
 interface P2PHandoff {
   status:            WebRTCStatus
   transport:         WebRTCTransport
-  remoteStream:      MediaStream | null
   disconnect:        () => void
   replaceVideoTrack: (track: MediaStreamTrack | null) => Promise<void>
   replaceAudioTrack: (track: MediaStreamTrack) => Promise<void>
@@ -165,33 +164,27 @@ export default function BabyDeviceP2P({
     onModeSwitch: () => onSwitchToLiveKit(),
   })
 
-  const status             = p2pHandoff ? p2pHandoff.status             : ownWebRTC.status
-  const transport          = p2pHandoff ? p2pHandoff.transport          : ownWebRTC.transport
-  const remoteStream       = p2pHandoff ? p2pHandoff.remoteStream       : ownWebRTC.remoteStream
-  const disconnect         = p2pHandoff ? p2pHandoff.disconnect         : ownWebRTC.disconnect
-  const replaceVideoTrack  = p2pHandoff ? p2pHandoff.replaceVideoTrack  : ownWebRTC.replaceVideoTrack
-  const replaceAudioTrack  = p2pHandoff ? p2pHandoff.replaceAudioTrack  : ownWebRTC.replaceAudioTrack
+  const status            = p2pHandoff ? p2pHandoff.status            : ownWebRTC.status
+  const transport         = p2pHandoff ? p2pHandoff.transport         : ownWebRTC.transport
+  const disconnect        = p2pHandoff ? p2pHandoff.disconnect        : ownWebRTC.disconnect
+  const replaceVideoTrack = p2pHandoff ? p2pHandoff.replaceVideoTrack : ownWebRTC.replaceVideoTrack
+  const replaceAudioTrack = p2pHandoff ? p2pHandoff.replaceAudioTrack : ownWebRTC.replaceAudioTrack
 
-  // ── Play parent's audio (speak-to-baby) ─────────────────────────────────
-  // When parent enables mic, the audio track in remoteStream becomes active.
-  // We play it via a programmatic Audio element (separate from the video preview).
-  useEffect(() => {
-    if (!remoteStream) return
-    const audioTracks = remoteStream.getAudioTracks()
-    if (audioTracks.length === 0) return
-    const audio = new Audio()
-    audio.srcObject = new MediaStream(audioTracks)
-    audio.play().catch(() => {})
-    return () => {
-      audio.pause()
-      try { audio.srcObject = null } catch {}
-    }
-  }, [remoteStream])
+  // ── Secret video-off toggle (triple-tap the "Privat" badge) ─────────────
+  // Disables video stream without ending the session.
+  // Baby sees a dark screen; parent sees AudioOnlyView + banner.
+  const secretTapRef = useRef(0)
 
-  // ── Video toggle (audio-only demo mode) ─────────────────────────────────
+  const handleSecretTap = () => {
+    secretTapRef.current += 1
+    if (secretTapRef.current < 3) return
+    secretTapRef.current = 0
+    toggleVideoOff()
+  }
+
   const toggleVideoOff = async () => {
     if (videoOff) {
-      // Re-enable video: acquire fresh video track
+      // Re-enable: re-acquire video track
       try {
         const newVidStream = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: facingModeRef.current, width: { ideal: 1280 }, height: { ideal: 720 } },
@@ -199,17 +192,19 @@ export default function BabyDeviceP2P({
         })
         const newVidTrack = newVidStream.getVideoTracks()[0]
         if (newVidTrack) {
-          await replaceVideoTrack(newVidTrack).catch(e => console.warn('[P2P] replaceVideoTrack resume:', e))
+          await replaceVideoTrack(newVidTrack).catch(e => console.warn('[P2P] replaceVideoTrack:', e))
           localStream?.getVideoTracks().forEach(t => t.stop())
           setLocalStream(new MediaStream([newVidTrack, ...(localStream?.getAudioTracks() ?? [])]))
         }
+        await postSignal(code, 'video-off', false)
         setVideoOff(false)
       } catch (e) { console.error('Video re-enable failed', e) }
     } else {
-      // Disable video: stop + remove from P2P
+      // Disable: stop video, null the sender, tell parent
       await replaceVideoTrack(null).catch(e => console.warn('[P2P] replaceVideoTrack null:', e))
       localStream?.getVideoTracks().forEach(t => t.stop())
       setLocalStream(new MediaStream(localStream?.getAudioTracks() ?? []))
+      await postSignal(code, 'video-off', true)
       setVideoOff(true)
     }
   }
@@ -291,17 +286,7 @@ export default function BabyDeviceP2P({
       {/* ── Local camera preview ─────────────────────────────────────── */}
       <video ref={videoRef} className="baby-preview" autoPlay playsInline muted
         style={{ visibility: videoOff ? 'hidden' : 'visible' }} />
-      {videoOff && (
-        <div className="video-off-screen">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none"
-            stroke="rgba(255,255,255,0.4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
-            <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
-            <line x1="1" y1="1" x2="23" y2="23"/>
-          </svg>
-          <span>Nur Audio</span>
-        </div>
-      )}
+      {videoOff && <div className="video-off-screen"><span>🎙️ Nur Audio</span></div>}
 
       {/* ── Night mode overlay ───────────────────────────────────────── */}
       {nightMode && (
@@ -317,7 +302,10 @@ export default function BabyDeviceP2P({
           <div className="baby-top-left">
             <div className="baby-badge-row">
               <ConnectionBadge state={badgeState} />
-              <ModeBadge mode="direct" transport={transport} />
+              {/* Triple-tap the mode badge to secretly toggle video off/on */}
+              <span onClick={handleSecretTap} style={{ cursor: 'default', userSelect: 'none' }}>
+                <ModeBadge mode="direct" transport={transport} />
+              </span>
             </div>
             <span className="wake-notice-inline">
               Wenn der Bildschirm ausgeht oder du die App verlässt, stoppt die Übertragung.
@@ -335,28 +323,6 @@ export default function BabyDeviceP2P({
                   <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
                 </svg>
                 Kamera drehen
-              </button>
-              <button className="flip-camera-btn" onClick={toggleVideoOff}>
-                {videoOff ? (
-                  <>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                      stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-                      <circle cx="12" cy="13" r="4"/>
-                    </svg>
-                    Video ein
-                  </>
-                ) : (
-                  <>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                      stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                      <line x1="1" y1="1" x2="23" y2="23"/>
-                      <path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h4a2 2 0 0 1 2 2v9.34"/>
-                      <circle cx="12" cy="13" r="4"/>
-                    </svg>
-                    Video aus
-                  </>
-                )}
               </button>
               <button className="flip-camera-btn" onClick={() => setNightMode(true)}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none"

@@ -25,7 +25,7 @@ import type { Participant } from 'livekit-client'
 import { QRCodeSVG } from 'qrcode.react'
 import { useToken } from '../hooks/useToken'
 import { useWakeLock } from '../hooks/useWakeLock'
-import { useWebRTC } from '../hooks/useWebRTC'
+import { useWebRTC, postSignal } from '../hooks/useWebRTC'
 import ConnectionBadge from '../components/ConnectionBadge'
 import ModeBadge from '../components/ModeBadge'
 import HelpButton from '../components/HelpButton'
@@ -69,7 +69,6 @@ export default function BabyDevice({ code, onBack }: Props) {
   const {
     status:            p2pStatus,
     transport:         p2pTransport,
-    remoteStream:      p2pRemoteStream,
     disconnect:        p2pDisconnect,
     replaceVideoTrack: p2pReplaceVideoTrack,
     replaceAudioTrack: p2pReplaceAudioTrack,
@@ -150,7 +149,6 @@ export default function BabyDevice({ code, onBack }: Props) {
         p2pHandoff={{
           status:            p2pStatus,
           transport:         p2pTransport,
-          remoteStream:      p2pRemoteStream,
           disconnect:        p2pDisconnect,
           replaceVideoTrack: p2pReplaceVideoTrack,
           replaceAudioTrack: p2pReplaceAudioTrack,
@@ -236,7 +234,6 @@ function BabyRoom({ code, onBack, camStream, p2pStatus }: LiveKitProps) {
   const [joinToast,        setJoinToast]        = useState<string | null>(null)
   const [shareToast,       setShareToast]       = useState<string | null>(null)
   const [isSwitchingCam,   setIsSwitchingCam]  = useState(false)
-  const [videoOff,         setVideoOff]         = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
 
   // Keep a ref to the currently published video track so we can unpublish on flip
@@ -301,41 +298,6 @@ function BabyRoom({ code, onBack, camStream, p2pStatus }: LiveKitProps) {
   // Uses facingMode toggle (not deviceId) — works on mobile Chrome where
   // enumerateDevices() returns empty deviceIds. Unpublishes the old LiveKit
   // track and publishes the new one without touching the audio track.
-  // ── Toggle video off/on ──────────────────────────────────────────────
-  const toggleVideoOff = useCallback(async () => {
-    if (videoOff) {
-      // Re-enable: re-acquire + republish video
-      try {
-        const newVidStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: facingModeRef.current, width: { ideal: 1280 }, height: { ideal: 720 } },
-          audio: false,
-        })
-        const newVidTrack = newVidStream.getVideoTracks()[0]
-        if (newVidTrack) {
-          const lkVideo = new LocalVideoTrack(newVidTrack, undefined, true)
-          publishedVideoTrackRef.current = newVidTrack
-          await localParticipant.publishTrack(lkVideo, { source: Track.Source.Camera }).catch(console.error)
-          if (videoRef.current) {
-            videoRef.current.srcObject = new MediaStream([newVidTrack, ...camStream.getAudioTracks()])
-          }
-        }
-        setVideoOff(false)
-      } catch (e) { console.error('Video re-enable failed', e) }
-    } else {
-      // Disable: unpublish + stop video track
-      const oldVidTrack = publishedVideoTrackRef.current
-      if (oldVidTrack) {
-        await localParticipant.unpublishTrack(oldVidTrack).catch(() => {})
-        oldVidTrack.stop()
-        publishedVideoTrackRef.current = null
-      }
-      if (videoRef.current) {
-        videoRef.current.srcObject = null
-      }
-      setVideoOff(true)
-    }
-  }, [videoOff, localParticipant, camStream])
-
   const flipCamera = useCallback(async () => {
     if (isSwitchingCam) return
     setIsSwitchingCam(true)
@@ -393,19 +355,7 @@ function BabyRoom({ code, onBack, camStream, p2pStatus }: LiveKitProps) {
     <div className={`screen baby-screen${nightMode ? ' baby-screen--night' : ''}`}>
 
       {/* Camera preview from pre-acquired stream */}
-      <video ref={videoRef} className="baby-preview" autoPlay playsInline muted
-        style={{ visibility: videoOff ? 'hidden' : 'visible' }} />
-      {videoOff && (
-        <div className="video-off-screen">
-          <svg width="48" height="48" viewBox="0 0 24 24" fill="none"
-            stroke="rgba(255,255,255,0.4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
-            <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
-            <line x1="1" y1="1" x2="23" y2="23"/>
-          </svg>
-          <span>Nur Audio</span>
-        </div>
-      )}
+      <video ref={videoRef} className="baby-preview" autoPlay playsInline muted />
 
       {/* Parent audio (speak-to-baby function) */}
       {parentAudio && isTrackReference(parentAudio) && <AudioTrack trackRef={parentAudio} />}
@@ -439,7 +389,7 @@ function BabyRoom({ code, onBack, camStream, p2pStatus }: LiveKitProps) {
               Wenn der Bildschirm ausgeht oder du die App verlässt, stoppt die Übertragung.
             </span>
             <div className="baby-top-actions">
-              <button className="flip-camera-btn" onClick={flipCamera} disabled={isSwitchingCam || videoOff}>
+              <button className="flip-camera-btn" onClick={flipCamera} disabled={isSwitchingCam}>
                 {/* Camera outline icon */}
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
                   stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -447,28 +397,6 @@ function BabyRoom({ code, onBack, camStream, p2pStatus }: LiveKitProps) {
                   <circle cx="12" cy="13" r="4"/>
                 </svg>
                 {isSwitchingCam ? 'Wechsle…' : 'Kamera drehen'}
-              </button>
-              <button className="flip-camera-btn" onClick={toggleVideoOff}>
-                {videoOff ? (
-                  <>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                      stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-                      <circle cx="12" cy="13" r="4"/>
-                    </svg>
-                    Video ein
-                  </>
-                ) : (
-                  <>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-                      stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                      <line x1="1" y1="1" x2="23" y2="23"/>
-                      <path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h4a2 2 0 0 1 2 2v9.34"/>
-                      <circle cx="12" cy="13" r="4"/>
-                    </svg>
-                    Video aus
-                  </>
-                )}
               </button>
               <button className="flip-camera-btn" onClick={() => setNightMode(true)}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none"

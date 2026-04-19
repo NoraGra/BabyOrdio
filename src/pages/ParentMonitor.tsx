@@ -157,10 +157,9 @@ function ParentRoom({
   // Previously gated on probe.status === 'available', which caused failures
   // when probe timed out on same-WiFi / same-machine scenarios.
   const {
-    status:              p2pStatus,
-    transport:           p2pTransport,
-    remoteStream:        p2pRemoteStream,
-    replaceParentAudio:  p2pReplaceParentAudio,
+    status:       p2pStatus,
+    transport:    p2pTransport,
+    remoteStream: p2pRemoteStream,
   } = useWebRTC({
     code,
     role:        'parent',
@@ -171,7 +170,8 @@ function ParentRoom({
   // P2P video element — muted so iOS allows autoplay without user gesture
   const p2pVideoRef    = useRef<HTMLVideoElement | null>(null)
   const p2pSwitchedRef = useRef(false)
-  const [p2pActive, setP2pActive] = useState(false)
+  const [p2pActive,      setP2pActive]      = useState(false)
+  const [babyVideoOff,   setBabyVideoOff]   = useState(false)
   // p2pVideoEl tracks the video DOM element reactively (for analysis hooks)
   const [p2pVideoEl, setP2pVideoEl] = useState<HTMLVideoElement | null>(null)
   const p2pVideoCallbackRef = useCallback((el: HTMLVideoElement | null) => {
@@ -223,6 +223,24 @@ function ParentRoom({
       p2pAudioElRef.current = null
     }
   }, [p2pActive, p2pRemoteStream])
+
+  // ── Poll for baby videoOff signal ────────────────────────────────────
+  // Baby posts 'video-off: true/false' to KV when toggling video.
+  // We poll independently at 2 s so the parent can show the right UI.
+  useEffect(() => {
+    let alive = true
+    const poll = async () => {
+      try {
+        const r = await fetch(`/api/signal?code=${code}`, { cache: 'no-store' })
+        if (!r.ok || !alive) return
+        const s = await r.json()
+        if (alive) setBabyVideoOff(!!s.videoOff)
+      } catch { /* ignore */ }
+    }
+    poll()
+    const id = setInterval(poll, 2000)
+    return () => { alive = false; clearInterval(id) }
+  }, [code])
 
   // When P2P stream arrives: put ONLY video tracks into the muted <video> element.
   // (Same as v45 — video is proven to work this way.)
@@ -395,52 +413,22 @@ function ParentRoom({
   // ── Connection disruption summary ─────────────────────────────────────
   const { summary, clearSummary } = useConnectionLog(monitorState, audioStats)
 
-  // ── Talk-to-baby ──────────────────────────────────────────────────────
-  // LiveKit mode: toggle via localParticipant.setMicrophoneEnabled
-  // P2P mode: getUserMedia → replaceParentAudio (uses speakSender in useWebRTC)
+  // ── Talk-to-baby (LiveKit mode only) ──────────────────────────────────
   const [isSpeaking, setIsSpeaking] = useState(false)
-  const p2pMicTrackRef = useRef<MediaStreamTrack | null>(null)
 
   const toggleSpeak = useCallback(async () => {
     try {
-      if (p2pActive) {
-        // P2P speak
-        if (isSpeaking) {
-          await p2pReplaceParentAudio(null)
-          p2pMicTrackRef.current?.stop()
-          p2pMicTrackRef.current = null
-          setIsSpeaking(false)
-        } else {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-          const track  = stream.getAudioTracks()[0]
-          p2pMicTrackRef.current = track
-          await p2pReplaceParentAudio(track)
-          setIsSpeaking(true)
-        }
+      if (isSpeaking) {
+        await localParticipant.setMicrophoneEnabled(false)
+        setIsSpeaking(false)
       } else {
-        // LiveKit speak
-        if (isSpeaking) {
-          await localParticipant.setMicrophoneEnabled(false)
-          setIsSpeaking(false)
-        } else {
-          await localParticipant.setMicrophoneEnabled(true)
-          setIsSpeaking(true)
-        }
+        await localParticipant.setMicrophoneEnabled(true)
+        setIsSpeaking(true)
       }
     } catch (e) {
       console.error('Mic toggle failed:', e)
     }
-  }, [isSpeaking, p2pActive, localParticipant, p2pReplaceParentAudio])
-
-  // Stop P2P mic when switching away from P2P or on unmount
-  useEffect(() => {
-    if (!p2pActive && p2pMicTrackRef.current) {
-      p2pReplaceParentAudio(null).catch(() => {})
-      p2pMicTrackRef.current.stop()
-      p2pMicTrackRef.current = null
-      setIsSpeaking(false)
-    }
-  }, [p2pActive, p2pReplaceParentAudio])
+  }, [isSpeaking, localParticipant])
 
   // ── End session confirm ───────────────────────────────────────────────
   const [showEndConfirm, setShowEndConfirm] = useState(false)
@@ -516,20 +504,25 @@ function ParentRoom({
           </div>
 
           {/* P2P video layer — MUTED so iOS allows autoplay.
-              Audio is handled by the separate <audio> element above. */}
+              Audio is handled by the separate <audio> element above.
+              When baby turned video off, show AudioOnlyView instead. */}
           {p2pRemoteStream && (
             <div
               className="video-layer"
               style={{ opacity: p2pActive ? 1 : 0 }}
             >
-              <video
-                ref={p2pVideoCallbackRef}
-                className="remote-video"
-                autoPlay
-                playsInline
-                muted
-                onPlaying={handleP2PCanPlay}
-              />
+              {p2pActive && babyVideoOff ? (
+                <AudioOnlyView waiting={false} />
+              ) : (
+                <video
+                  ref={p2pVideoCallbackRef}
+                  className="remote-video"
+                  autoPlay
+                  playsInline
+                  muted
+                  onPlaying={handleP2PCanPlay}
+                />
+              )}
             </div>
           )}
         </div>
@@ -542,7 +535,7 @@ function ParentRoom({
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <ConnectionBadge
                 state={monitorState}
-                videoQuality={p2pActive ? 3 : videoQuality}
+                videoQuality={p2pActive ? (babyVideoOff ? 0 : 3) : videoQuality}
                 audioQuality={p2pActive ? 3 : audioQuality}
                 light
               />
@@ -616,20 +609,22 @@ function ParentRoom({
                 </svg>
                 Analyse
               </button>
-              {/* Speak button — works in both LiveKit and P2P modes */}
-              <button
-                className={`speak-btn${isSpeaking ? ' speak-btn--active' : ''}`}
-                onClick={(e) => { e.stopPropagation(); toggleSpeak() }}
-                aria-label={isSpeaking ? 'Mikrofon deaktivieren' : 'Mit Baby sprechen'}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                  <line x1="12" y1="19" x2="12" y2="23"/>
-                  <line x1="8" y1="23" x2="16" y2="23"/>
-                </svg>
-                {isSpeaking ? 'Mikrofon aktiv' : 'Sprechen'}
-              </button>
+              {/* Speak button — LiveKit mode only */}
+              {!p2pActive && (
+                <button
+                  className={`speak-btn${isSpeaking ? ' speak-btn--active' : ''}`}
+                  onClick={(e) => { e.stopPropagation(); toggleSpeak() }}
+                  aria-label={isSpeaking ? 'Mikrofon deaktivieren' : 'Mit Baby sprechen'}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                    <line x1="12" y1="19" x2="12" y2="23"/>
+                    <line x1="8" y1="23" x2="16" y2="23"/>
+                  </svg>
+                  {isSpeaking ? 'Mikrofon aktiv' : 'Sprechen'}
+                </button>
+              )}
               {/* Tap-to-unmute fallback — shown when browser blocks audio autoplay (e.g. iOS) */}
               {p2pActive && audioBlocked && (
                 <button
@@ -702,6 +697,13 @@ function ParentRoom({
         {!p2pActive && monitorState === 'degraded' && (
           <div className="degraded-banner">
             🔊 Nur Audio — Video pausiert für stabile Verbindung
+          </div>
+        )}
+
+        {/* Baby turned video off intentionally */}
+        {p2pActive && babyVideoOff && (
+          <div className="degraded-banner">
+            🎙️ Baby hat Video deaktiviert — nur Audio aktiv
           </div>
         )}
 
@@ -798,9 +800,9 @@ function ParentRoom({
               isMoving:      moveState.isMoving,
               moveIntensity: moveState.intensity,
             }}
-            videoQuality={p2pActive ? 3 : videoQuality}
+            videoQuality={p2pActive ? (babyVideoOff ? 0 : 3) : videoQuality}
             audioQuality={p2pActive ? 3 : audioQuality}
-            showVideoOffBanner={!p2pActive && monitorState === 'degraded'}
+            showVideoOffBanner={babyVideoOff || (!p2pActive && monitorState === 'degraded')}
             onBack={() => setShowDashboard(false)}
           />
         </div>

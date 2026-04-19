@@ -57,14 +57,12 @@ export type WebRTCStatus =
 export type WebRTCTransport = 'direct' | 'relay' | 'unknown'
 
 export interface WebRTCResult {
-  status:              WebRTCStatus
-  transport:           WebRTCTransport
-  remoteStream:        MediaStream | null
-  disconnect:          () => void
-  replaceVideoTrack:   (track: MediaStreamTrack | null) => Promise<void>
-  replaceAudioTrack:   (track: MediaStreamTrack) => Promise<void>
-  /** Parent only: replace the audio track sent to the baby (speak-to-baby). */
-  replaceParentAudio:  (track: MediaStreamTrack | null) => Promise<void>
+  status:             WebRTCStatus
+  transport:          WebRTCTransport
+  remoteStream:       MediaStream | null
+  disconnect:         () => void
+  replaceVideoTrack:  (track: MediaStreamTrack | null) => Promise<void>
+  replaceAudioTrack:  (track: MediaStreamTrack) => Promise<void>
 }
 
 interface Options {
@@ -131,9 +129,6 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
   // replaceAudioTrack silently does nothing. Storing refs avoids this problem.
   const audioSenderRef = useRef<RTCRtpSender | null>(null)
   const videoSenderRef = useRef<RTCRtpSender | null>(null)
-  // Parent-to-baby speak: the sender on the parent side for the recvonly transceiver
-  // that baby declared in its offer. Captured after answer SDP is set.
-  const speakSenderRef = useRef<RTCRtpSender | null>(null)
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
@@ -160,17 +155,7 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
     }
   }, [])
 
-  const replaceParentAudio = useCallback(async (track: MediaStreamTrack | null) => {
-    const sender = speakSenderRef.current
-    if (sender) {
-      LOG('replaceParentAudio → replacing track', track?.id ?? 'null')
-      await sender.replaceTrack(track)
-    } else {
-      LOG('replaceParentAudio → NO speak sender found!')
-    }
-  }, [])
-
-  const replaceAudioTrack = useCallback(async (newTrack: MediaStreamTrack) => {
+const replaceAudioTrack = useCallback(async (newTrack: MediaStreamTrack) => {
     // Use stored ref first (survives sender.track becoming null after replaceTrack(null))
     const sender = audioSenderRef.current
       ?? pcRef.current?.getSenders().find(s => s.track?.kind === 'audio')
@@ -220,10 +205,6 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
       // Baby (offerer): add a recvonly transceiver so parent can speak back.
       // This creates an m-line in the offer; parent's answerer side sees it as
       // sendonly → parent uses that sender to stream mic audio to baby.
-      if (role === 'baby') {
-        pc.addTransceiver('audio', { direction: 'recvonly' })
-        LOG('added recvonly transceiver for parent-to-baby speak')
-      }
     }
 
     // ── Receive remote tracks ─────────────────────────────────────────
@@ -348,16 +329,6 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
           await applyPending()
           const answer = await pc.createAnswer()
           await pc.setLocalDescription(answer)
-          // Find the sendonly transceiver (mirrors baby's recvonly) — this is the
-          // speak-to-baby channel. Baby declared recvonly → SDP flips to sendonly
-          // from our (parent) perspective.
-          const speakTx = pc.getTransceivers().find(t => t.direction === 'sendonly')
-          if (speakTx) {
-            speakSenderRef.current = speakTx.sender
-            LOG('speakSender captured:', speakTx.sender)
-          } else {
-            LOG('speakSender NOT found — baby may not have added recvonly transceiver yet')
-          }
           LOG('posting answer')
           await postSignal(code, 'answer', { type: answer.type, sdp: answer.sdp })
         } catch (e) { console.error('[P2P] answer error', e) }
@@ -421,10 +392,9 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
       pc.close()
       audioSenderRef.current = null
       videoSenderRef.current = null
-      speakSenderRef.current = null
       setRemoteStream(null)
     }
   }, [code, role, localStream, enabled, stopPolling])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { status, transport, remoteStream, disconnect, replaceVideoTrack, replaceAudioTrack, replaceParentAudio }
+  return { status, transport, remoteStream, disconnect, replaceVideoTrack, replaceAudioTrack }
 }

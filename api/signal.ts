@@ -10,6 +10,7 @@ interface SignalState {
   parentIce:       string[]
   mode:            'p2p' | 'livekit'
   upgradeRequest?: 'p2p'      // parent → baby: "please switch to P2P"
+  videoOff?:       boolean    // baby → parent: video intentionally disabled
   createdAt:       number
 }
 
@@ -70,6 +71,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         break
       case 'upgrade':
         next = { ...state, upgradeRequest: 'p2p' }
+        break
+      case 'video-off':
+        next = { ...state, videoOff: data as boolean }
         break
       case 'reset':
         next = fresh()
