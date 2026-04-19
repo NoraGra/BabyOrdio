@@ -178,50 +178,62 @@ function ParentRoom({
     setP2pVideoEl(el)
   }, [])
 
-  // P2P audio — simplest reliable approach across all browsers + iOS:
+  // P2P audio — separate Audio element, created dynamically when P2P is active.
   //
-  // We put BOTH video and audio tracks into the same muted <video> element.
-  // The element starts muted (required for autoplay without user gesture).
-  // Once the P2P switch is confirmed (p2pActive = true), we imperatively set
-  // videoElement.muted = false. Browsers always allow unmuting an already-playing
-  // video — no AudioContext, no user-gesture restriction, no resume() needed.
+  // We keep the <video> element muted (only video tracks) so autoplay always
+  // works without touching what made video reliable.
   //
-  // Why not AudioContext? AudioContext.resume() only works synchronously inside
-  // a user-gesture handler. Calling it from useEffect or setTimeout fails on
-  // mobile browsers (Chrome Android, iOS Safari) even if the user has tapped.
+  // Audio is handled by a programmatically-created <audio> element:
+  //   1. Created when both p2pActive AND p2pRemoteStream with audio are ready
+  //   2. .play() is called immediately — succeeds on desktop if user interacted
+  //   3. If play() is blocked (iOS strict autoplay), we show a tap-to-unmute button
+  //
+  // This avoids: AudioContext resume() issues, srcObject reassignment black frames,
+  // and React muted-prop fighting with imperative el.muted = false.
 
-  // When P2P stream arrives: put video + audio into the muted video element.
+  const p2pAudioElRef  = useRef<HTMLAudioElement | null>(null)
+  const [audioBlocked, setAudioBlocked] = useState(false)
+
+  useEffect(() => {
+    if (!p2pActive || !p2pRemoteStream) return
+    const audioTracks = p2pRemoteStream.getAudioTracks()
+    console.log('[Audio] p2pActive+stream — audioTracks:', audioTracks.length,
+      audioTracks.map(t => `${t.id.slice(0,8)} state=${t.readyState} enabled=${t.enabled}`))
+    if (audioTracks.length === 0) return
+
+    const audio = new Audio()
+    audio.srcObject = new MediaStream(audioTracks)
+    audio.volume = 1
+    p2pAudioElRef.current = audio
+
+    audio.play()
+      .then(() => {
+        console.log('[Audio] play() succeeded')
+        setAudioBlocked(false)
+      })
+      .catch(e => {
+        console.warn('[Audio] play() blocked:', e)
+        setAudioBlocked(true)   // show tap-to-unmute button
+      })
+
+    return () => {
+      audio.pause()
+      try { audio.srcObject = null } catch {}
+      p2pAudioElRef.current = null
+    }
+  }, [p2pActive, p2pRemoteStream])
+
+  // When P2P stream arrives: put ONLY video tracks into the muted <video> element.
+  // (Same as v45 — video is proven to work this way.)
   useEffect(() => {
     if (!p2pRemoteStream) return
     const videoTracks = p2pRemoteStream.getVideoTracks()
-    const audioTracks = p2pRemoteStream.getAudioTracks()
-
-    console.log('[Audio] remoteStream updated — video:', videoTracks.length, 'audio:', audioTracks.length,
-      audioTracks.map(t => `${t.id.slice(0,8)} readyState=${t.readyState} enabled=${t.enabled} muted=${t.muted}`))
-
     const el = p2pVideoRef.current
     if (el && videoTracks.length > 0) {
-      // Include audio tracks so unmuting the element later plays audio
-      el.srcObject = new MediaStream([...videoTracks, ...audioTracks])
-      el.play().catch(e => console.warn('[Audio] play() failed:', e))
-      console.log('[Audio] srcObject set on video el — el.muted=', el.muted)
+      el.srcObject = new MediaStream(videoTracks)
+      el.play().catch(() => {})
     }
   }, [p2pRemoteStream])
-
-  // Unmute the video element when P2P switch completes.
-  // .muted = false on a playing element works everywhere — no gesture needed.
-  useEffect(() => {
-    if (!p2pActive) return
-    const el = p2pVideoRef.current
-    console.log('[Audio] p2pActive → unmuting. el=', !!el,
-      'srcObject tracks:', el?.srcObject instanceof MediaStream
-        ? `v${(el.srcObject as MediaStream).getVideoTracks().length} a${(el.srcObject as MediaStream).getAudioTracks().length}`
-        : 'none')
-    if (el) {
-      el.muted = false
-      console.log('[Audio] muted set to false. el.muted=', el.muted, 'el.volume=', el.volume)
-    }
-  }, [p2pActive])
 
   // Core switch logic — called by onPlaying OR by the p2pStatus fallback below
   const doSwitch = useCallback(async () => {
@@ -230,17 +242,14 @@ function ParentRoom({
     await postSignal(code, 'upgrade', 'p2p')  // signal baby
     setP2pActive(true)                         // start CSS crossfade
 
-    // iOS workaround: re-assign srcObject with a fresh MediaStream reference
-    // to force iOS WebKit to request a new keyframe. Preserve both video AND
-    // audio tracks so unmuting the element afterwards plays audio correctly.
+    // iOS workaround: re-assign srcObject with a fresh MediaStream (video only,
+    // still muted) to force WebKit to request a new keyframe on switch.
     setTimeout(() => {
       const el = p2pVideoRef.current
       if (el && el.srcObject instanceof MediaStream) {
         const vTracks = el.srcObject.getVideoTracks()
-        const aTracks = el.srcObject.getAudioTracks()
         if (vTracks.length > 0) {
-          el.srcObject = new MediaStream([...vTracks, ...aTracks])
-          el.muted = false   // unmute here — iOS allows this after play()
+          el.srcObject = new MediaStream(vTracks)   // video only, stays muted
           el.play().catch(() => {})
         }
       }
@@ -413,8 +422,8 @@ function ParentRoom({
   useEffect(() => {
     if (!showDebug) return
     const id = setInterval(() => {
-      const el = p2pVideoRef.current
-      const srcStream = el?.srcObject instanceof MediaStream ? el.srcObject : null
+      const vid = p2pVideoRef.current
+      const aud = p2pAudioElRef.current
       const audioTracks = p2pRemoteStream?.getAudioTracks() ?? []
       setDebugInfo({
         'p2pActive':    String(p2pActive),
@@ -422,13 +431,10 @@ function ParentRoom({
         'remoteStream': p2pRemoteStream
           ? `v${p2pRemoteStream.getVideoTracks().length} a${p2pRemoteStream.getAudioTracks().length}`
           : 'null',
-        'videoEl':      el ? (el.paused ? 'paused' : 'playing') : 'null',
-        'el.muted':     el ? String(el.muted) : '–',
-        'el.volume':    el ? String(el.volume) : '–',
-        'el.srcTracks': srcStream
-          ? `v${srcStream.getVideoTracks().length} a${srcStream.getAudioTracks().length}`
-          : 'none',
-        'audioTracks':  audioTracks.map(t =>
+        'video':        vid ? (vid.paused ? '⏸ paused' : '▶ playing') + ` muted=${vid.muted}` : 'null',
+        'audioEl':      aud ? (aud.paused ? '⏸ paused' : '▶ playing') + ` vol=${aud.volume}` : 'null',
+        'audioBlocked': String(audioBlocked),
+        'tracks':       audioTracks.map(t =>
           `${t.readyState} en=${t.enabled} mu=${t.muted}`).join(' | ') || '–',
       })
     }, 500)
@@ -595,13 +601,25 @@ function ParentRoom({
                   {isSpeaking ? 'Mikrofon aktiv' : 'Sprechen'}
                 </button>
               )}
-              {/* Demo mode: simulate audio-only / degraded connection */}
-              {/* Hidden from UI but functionality kept for internal testing */}
+              {/* Tap-to-unmute fallback — shown when browser blocks audio autoplay (e.g. iOS) */}
+              {p2pActive && audioBlocked && (
+                <button
+                  className="speak-btn speak-btn--active"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    p2pAudioElRef.current?.play()
+                      .then(() => setAudioBlocked(false))
+                      .catch(() => {})
+                  }}
+                >
+                  🔇 Audio aktivieren
+                </button>
+              )}
+              {/* Demo mode — hidden */}
               <button
                 className="speak-btn"
                 style={{ display: 'none' }}
                 onClick={(e) => { e.stopPropagation(); setDemoDegrade(d => !d) }}
-                title="Demo: Schwaches Signal simulieren"
               >
                 {demoDegrade ? '▶ Video' : '🎬 Demo'}
               </button>
