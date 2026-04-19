@@ -585,7 +585,7 @@ function ParentRoom({
                 </svg>
                 Analyse
               </button>
-              {/* Speak button — LiveKit mode only */}
+              {/* Speak button only available in LiveKit mode (P2P audio is one-way for now) */}
               {!p2pActive && (
                 <button
                   className={`speak-btn${isSpeaking ? ' speak-btn--active' : ''}`}
@@ -675,7 +675,6 @@ function ParentRoom({
             🔊 Nur Audio — Video pausiert für stabile Verbindung
           </div>
         )}
-
 
         {/* Critical overlay (suppress when P2P is active — LK disconnect is intentional) */}
         {!p2pActive && monitorState === 'critical' && (
