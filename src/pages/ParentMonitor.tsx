@@ -196,11 +196,15 @@ function ParentRoom({
     const videoTracks = p2pRemoteStream.getVideoTracks()
     const audioTracks = p2pRemoteStream.getAudioTracks()
 
+    console.log('[Audio] remoteStream updated — video:', videoTracks.length, 'audio:', audioTracks.length,
+      audioTracks.map(t => `${t.id.slice(0,8)} readyState=${t.readyState} enabled=${t.enabled} muted=${t.muted}`))
+
     const el = p2pVideoRef.current
     if (el && videoTracks.length > 0) {
       // Include audio tracks so unmuting the element later plays audio
       el.srcObject = new MediaStream([...videoTracks, ...audioTracks])
-      el.play().catch(() => {})
+      el.play().catch(e => console.warn('[Audio] play() failed:', e))
+      console.log('[Audio] srcObject set on video el — el.muted=', el.muted)
     }
   }, [p2pRemoteStream])
 
@@ -209,7 +213,14 @@ function ParentRoom({
   useEffect(() => {
     if (!p2pActive) return
     const el = p2pVideoRef.current
-    if (el) el.muted = false
+    console.log('[Audio] p2pActive → unmuting. el=', !!el,
+      'srcObject tracks:', el?.srcObject instanceof MediaStream
+        ? `v${(el.srcObject as MediaStream).getVideoTracks().length} a${(el.srcObject as MediaStream).getAudioTracks().length}`
+        : 'none')
+    if (el) {
+      el.muted = false
+      console.log('[Audio] muted set to false. el.muted=', el.muted, 'el.volume=', el.volume)
+    }
   }, [p2pActive])
 
   // Core switch logic — called by onPlaying OR by the p2pStatus fallback below
@@ -402,18 +413,23 @@ function ParentRoom({
   useEffect(() => {
     if (!showDebug) return
     const id = setInterval(() => {
-      const ctx   = p2pAudioCtxRef.current
-      const src   = p2pAudioSourceRef.current
-      const tracks = p2pAudioTracksRef.current
+      const el = p2pVideoRef.current
+      const srcStream = el?.srcObject instanceof MediaStream ? el.srcObject : null
+      const audioTracks = p2pRemoteStream?.getAudioTracks() ?? []
       setDebugInfo({
-        'ctx.state':    ctx?.state ?? 'null',
-        'tracks':       `${tracks.length} (${tracks.map(t => `${t.kind}:${t.readyState}`).join(', ') || '–'})`,
-        'source':       src ? 'connected' : 'null',
         'p2pActive':    String(p2pActive),
         'p2pStatus':    p2pStatus,
         'remoteStream': p2pRemoteStream
           ? `v${p2pRemoteStream.getVideoTracks().length} a${p2pRemoteStream.getAudioTracks().length}`
           : 'null',
+        'videoEl':      el ? (el.paused ? 'paused' : 'playing') : 'null',
+        'el.muted':     el ? String(el.muted) : '–',
+        'el.volume':    el ? String(el.volume) : '–',
+        'el.srcTracks': srcStream
+          ? `v${srcStream.getVideoTracks().length} a${srcStream.getAudioTracks().length}`
+          : 'none',
+        'audioTracks':  audioTracks.map(t =>
+          `${t.readyState} en=${t.enabled} mu=${t.muted}`).join(' | ') || '–',
       })
     }, 500)
     return () => clearInterval(id)
