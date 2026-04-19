@@ -178,103 +178,39 @@ function ParentRoom({
     setP2pVideoEl(el)
   }, [])
 
-  // P2P audio via Web Audio API — bypasses iOS <audio> autoplay restrictions.
+  // P2P audio — simplest reliable approach across all browsers + iOS:
   //
-  // Core problem: AudioContext.resume() only works from within a user-gesture
-  // handler. The P2P stream arrives asynchronously (no gesture), so we can't
-  // resume immediately. Instead we store the audio tracks in a ref and have
-  // ONE stable function (connectP2PAudio) that's called from BOTH:
-  //   a) when the P2P stream arrives (connects immediately if ctx already running)
-  //   b) when the ctx is unlocked (re-connects with the stored tracks)
-  const p2pAudioCtxRef    = useRef<AudioContext | null>(null)
-  const p2pAudioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null)
-  const p2pAudioTracksRef = useRef<MediaStreamTrack[]>([])  // stable storage
-
-  // Stable connect function — reads from refs, safe to call any time
-  const connectP2PAudio = useCallback(() => {
-    const ctx    = p2pAudioCtxRef.current
-    const tracks = p2pAudioTracksRef.current
-    if (!ctx || ctx.state !== 'running' || tracks.length === 0) return
-    p2pAudioSourceRef.current?.disconnect()
-    p2pAudioSourceRef.current = null
-    try {
-      const source = ctx.createMediaStreamSource(new MediaStream(tracks))
-      source.connect(ctx.destination)
-      p2pAudioSourceRef.current = source
-    } catch (e) { console.warn('[P2P] audio connect:', e) }
-  }, [])
-
-  // Create AudioContext once on mount; unlock via user interaction + LiveKit events.
+  // We put BOTH video and audio tracks into the same muted <video> element.
+  // The element starts muted (required for autoplay without user gesture).
+  // Once the P2P switch is confirmed (p2pActive = true), we imperatively set
+  // videoElement.muted = false. Browsers always allow unmuting an already-playing
+  // video — no AudioContext, no user-gesture restriction, no resume() needed.
   //
-  // IMPORTANT: do NOT use { once: true } on the listeners.
-  // The first user tap often fires before P2P audio tracks have arrived, so
-  // connectP2PAudio() is a no-op at that point. Without once:true the listener
-  // persists and fires again when the user next taps — by that time tracks are
-  // available and audio connects properly.
-  useEffect(() => {
-    const ctx = new AudioContext()
-    p2pAudioCtxRef.current = ctx
+  // Why not AudioContext? AudioContext.resume() only works synchronously inside
+  // a user-gesture handler. Calling it from useEffect or setTimeout fails on
+  // mobile browsers (Chrome Android, iOS Safari) even if the user has tapped.
 
-    const unlock = () => ctx.resume().then(connectP2PAudio).catch(() => {})
-    document.addEventListener('touchstart', unlock, { capture: true })
-    document.addEventListener('mousedown',  unlock, { capture: true })
-
-    return () => {
-      ctx.close().catch(() => {})
-      p2pAudioCtxRef.current = null
-      document.removeEventListener('touchstart', unlock, { capture: true })
-      document.removeEventListener('mousedown',  unlock, { capture: true })
-    }
-  }, [connectP2PAudio])
-
-  // Piggyback on LiveKit's audio-unlock mechanism.
-  // LiveKit's startAudio() calls AudioContext.resume() from within a touchstart
-  // handler and fires AudioPlaybackStatusChanged once audio is allowed.
-  // At that moment the browser permits AudioContext ops — we use it to connect.
-  useEffect(() => {
-    if (!room) return
-    const tryUnlock = () => {
-      if (!room.canPlaybackAudio) return
-      p2pAudioCtxRef.current?.resume().then(connectP2PAudio).catch(() => {})
-    }
-    room.on(RoomEvent.AudioPlaybackStatusChanged, tryUnlock)
-    tryUnlock()  // check immediately (may already be unlocked)
-    return () => { room.off(RoomEvent.AudioPlaybackStatusChanged, tryUnlock) }
-  }, [room, connectP2PAudio])
-
-  // Extra fallback: when P2P switch just completed, force a resume attempt.
-  // By the time p2pActive becomes true, the user has watched the crossfade
-  // animation and the LK audio-unlock has likely already run — so resume()
-  // should succeed here even without a fresh user gesture.
-  useEffect(() => {
-    if (!p2pActive) return
-    p2pAudioCtxRef.current?.resume().then(connectP2PAudio).catch(() => {})
-  }, [p2pActive, connectP2PAudio])
-
-  // When P2P stream arrives: store audio tracks + try immediate connect.
-  // Video goes to the muted <video> element (iOS allows muted-video autoplay).
+  // When P2P stream arrives: put video + audio into the muted video element.
   useEffect(() => {
     if (!p2pRemoteStream) return
     const videoTracks = p2pRemoteStream.getVideoTracks()
     const audioTracks = p2pRemoteStream.getAudioTracks()
 
-    // Video
-    if (p2pVideoRef.current && videoTracks.length > 0) {
-      p2pVideoRef.current.srcObject = new MediaStream(videoTracks)
-      p2pVideoRef.current.play().catch(() => {})
+    const el = p2pVideoRef.current
+    if (el && videoTracks.length > 0) {
+      // Include audio tracks so unmuting the element later plays audio
+      el.srcObject = new MediaStream([...videoTracks, ...audioTracks])
+      el.play().catch(() => {})
     }
+  }, [p2pRemoteStream])
 
-    // Audio — store tracks and try connecting (works if ctx already running)
-    if (audioTracks.length > 0) {
-      p2pAudioTracksRef.current = audioTracks
-      connectP2PAudio()  // immediate attempt; no-op if ctx still suspended
-    }
-
-    return () => {
-      p2pAudioSourceRef.current?.disconnect()
-      p2pAudioSourceRef.current = null
-    }
-  }, [p2pRemoteStream, connectP2PAudio])
+  // Unmute the video element when P2P switch completes.
+  // .muted = false on a playing element works everywhere — no gesture needed.
+  useEffect(() => {
+    if (!p2pActive) return
+    const el = p2pVideoRef.current
+    if (el) el.muted = false
+  }, [p2pActive])
 
   // Core switch logic — called by onPlaying OR by the p2pStatus fallback below
   const doSwitch = useCallback(async () => {
@@ -284,14 +220,16 @@ function ParentRoom({
     setP2pActive(true)                         // start CSS crossfade
 
     // iOS workaround: re-assign srcObject with a fresh MediaStream reference
-    // to force iOS WebKit to request a new keyframe. Using a new MediaStream
-    // (rather than null→src) avoids the brief visual black flash that null causes.
+    // to force iOS WebKit to request a new keyframe. Preserve both video AND
+    // audio tracks so unmuting the element afterwards plays audio correctly.
     setTimeout(() => {
       const el = p2pVideoRef.current
       if (el && el.srcObject instanceof MediaStream) {
-        const tracks = el.srcObject.getVideoTracks()
-        if (tracks.length > 0) {
-          el.srcObject = new MediaStream(tracks)
+        const vTracks = el.srcObject.getVideoTracks()
+        const aTracks = el.srcObject.getAudioTracks()
+        if (vTracks.length > 0) {
+          el.srcObject = new MediaStream([...vTracks, ...aTracks])
+          el.muted = false   // unmute here — iOS allows this after play()
           el.play().catch(() => {})
         }
       }
@@ -456,6 +394,31 @@ function ParentRoom({
   // ── End session confirm ───────────────────────────────────────────────
   const [showEndConfirm, setShowEndConfirm] = useState(false)
 
+  // ── Debug overlay (tap top-left corner 3× to toggle) ─────────────────
+  const [showDebug, setShowDebug]   = useState(false)
+  const debugTapRef                 = useRef(0)
+  const [debugInfo, setDebugInfo]   = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    if (!showDebug) return
+    const id = setInterval(() => {
+      const ctx   = p2pAudioCtxRef.current
+      const src   = p2pAudioSourceRef.current
+      const tracks = p2pAudioTracksRef.current
+      setDebugInfo({
+        'ctx.state':    ctx?.state ?? 'null',
+        'tracks':       `${tracks.length} (${tracks.map(t => `${t.kind}:${t.readyState}`).join(', ') || '–'})`,
+        'source':       src ? 'connected' : 'null',
+        'p2pActive':    String(p2pActive),
+        'p2pStatus':    p2pStatus,
+        'remoteStream': p2pRemoteStream
+          ? `v${p2pRemoteStream.getVideoTracks().length} a${p2pRemoteStream.getAudioTracks().length}`
+          : 'null',
+      })
+    }, 500)
+    return () => clearInterval(id)
+  }, [showDebug, p2pActive, p2pStatus, p2pRemoteStream])
+
   // ── Dashboard overlay ─────────────────────────────────────────────────
   const [showDashboard, setShowDashboard] = useState(false)
   const prevMonitorRef = useRef(monitorState)
@@ -482,7 +445,7 @@ function ParentRoom({
           <AudioTrack trackRef={audioRef} />
         )}
 
-        {/* P2P audio is handled via AudioContext (see p2pAudioCtxRef) — no <audio> element needed */}
+        {/* P2P audio is handled by the muted video element — unmuted imperatively when p2pActive */}
 
         {/* ── Dual video layers — crossfade between LiveKit and P2P ──── */}
         <div className="video-container">
@@ -633,6 +596,34 @@ function ParentRoom({
 
         {summary && <SummaryBanner summary={summary} onDismiss={clearSummary} />}
         <HelpButton screen="monitor" />
+
+        {/* Debug tap zone — invisible 60×60 hit target top-left corner */}
+        <div
+          style={{ position: 'absolute', top: 0, left: 0, width: 60, height: 60, zIndex: 200 }}
+          onClick={() => {
+            debugTapRef.current += 1
+            if (debugTapRef.current >= 3) {
+              debugTapRef.current = 0
+              setShowDebug(d => !d)
+            }
+          }}
+        />
+
+        {/* Debug overlay */}
+        {showDebug && (
+          <div style={{
+            position: 'fixed', bottom: 120, left: 10, zIndex: 300,
+            background: 'rgba(0,0,0,0.88)', color: '#0f0', fontFamily: 'monospace',
+            fontSize: 11, borderRadius: 8, padding: '8px 12px', lineHeight: 1.8,
+            maxWidth: 300,
+          }}>
+            <div style={{ color: '#ff0', marginBottom: 4 }}>🔍 Audio Debug</div>
+            {Object.entries(debugInfo).map(([k, v]) => (
+              <div key={k}><span style={{ color: '#888' }}>{k}:</span> {v}</div>
+            ))}
+            <div style={{ color: '#555', fontSize: 10, marginTop: 4 }}>Tap top-left 3× to close</div>
+          </div>
+        )}
 
         {/* ── Connection state banners ──────────────────────────────────── */}
 
