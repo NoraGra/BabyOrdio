@@ -157,9 +157,10 @@ function ParentRoom({
   // Previously gated on probe.status === 'available', which caused failures
   // when probe timed out on same-WiFi / same-machine scenarios.
   const {
-    status:       p2pStatus,
-    transport:    p2pTransport,
-    remoteStream: p2pRemoteStream,
+    status:              p2pStatus,
+    transport:           p2pTransport,
+    remoteStream:        p2pRemoteStream,
+    replaceParentAudio:  p2pReplaceParentAudio,
   } = useWebRTC({
     code,
     role:        'parent',
@@ -394,22 +395,52 @@ function ParentRoom({
   // ── Connection disruption summary ─────────────────────────────────────
   const { summary, clearSummary } = useConnectionLog(monitorState, audioStats)
 
-  // ── Talk-to-baby (LiveKit mode only) ──────────────────────────────────
+  // ── Talk-to-baby ──────────────────────────────────────────────────────
+  // LiveKit mode: toggle via localParticipant.setMicrophoneEnabled
+  // P2P mode: getUserMedia → replaceParentAudio (uses speakSender in useWebRTC)
   const [isSpeaking, setIsSpeaking] = useState(false)
+  const p2pMicTrackRef = useRef<MediaStreamTrack | null>(null)
 
   const toggleSpeak = useCallback(async () => {
     try {
-      if (isSpeaking) {
-        await localParticipant.setMicrophoneEnabled(false)
-        setIsSpeaking(false)
+      if (p2pActive) {
+        // P2P speak
+        if (isSpeaking) {
+          await p2pReplaceParentAudio(null)
+          p2pMicTrackRef.current?.stop()
+          p2pMicTrackRef.current = null
+          setIsSpeaking(false)
+        } else {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+          const track  = stream.getAudioTracks()[0]
+          p2pMicTrackRef.current = track
+          await p2pReplaceParentAudio(track)
+          setIsSpeaking(true)
+        }
       } else {
-        await localParticipant.setMicrophoneEnabled(true)
-        setIsSpeaking(true)
+        // LiveKit speak
+        if (isSpeaking) {
+          await localParticipant.setMicrophoneEnabled(false)
+          setIsSpeaking(false)
+        } else {
+          await localParticipant.setMicrophoneEnabled(true)
+          setIsSpeaking(true)
+        }
       }
     } catch (e) {
       console.error('Mic toggle failed:', e)
     }
-  }, [isSpeaking, localParticipant])
+  }, [isSpeaking, p2pActive, localParticipant, p2pReplaceParentAudio])
+
+  // Stop P2P mic when switching away from P2P or on unmount
+  useEffect(() => {
+    if (!p2pActive && p2pMicTrackRef.current) {
+      p2pReplaceParentAudio(null).catch(() => {})
+      p2pMicTrackRef.current.stop()
+      p2pMicTrackRef.current = null
+      setIsSpeaking(false)
+    }
+  }, [p2pActive, p2pReplaceParentAudio])
 
   // ── End session confirm ───────────────────────────────────────────────
   const [showEndConfirm, setShowEndConfirm] = useState(false)
@@ -585,22 +616,20 @@ function ParentRoom({
                 </svg>
                 Analyse
               </button>
-              {/* Speak button only available in LiveKit mode (P2P audio is one-way for now) */}
-              {!p2pActive && (
-                <button
-                  className={`speak-btn${isSpeaking ? ' speak-btn--active' : ''}`}
-                  onClick={(e) => { e.stopPropagation(); toggleSpeak() }}
-                  aria-label={isSpeaking ? 'Mikrofon deaktivieren' : 'Mit Baby sprechen'}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                    <line x1="12" y1="19" x2="12" y2="23"/>
-                    <line x1="8" y1="23" x2="16" y2="23"/>
-                  </svg>
-                  {isSpeaking ? 'Mikrofon aktiv' : 'Sprechen'}
-                </button>
-              )}
+              {/* Speak button — works in both LiveKit and P2P modes */}
+              <button
+                className={`speak-btn${isSpeaking ? ' speak-btn--active' : ''}`}
+                onClick={(e) => { e.stopPropagation(); toggleSpeak() }}
+                aria-label={isSpeaking ? 'Mikrofon deaktivieren' : 'Mit Baby sprechen'}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                  <line x1="12" y1="19" x2="12" y2="23"/>
+                  <line x1="8" y1="23" x2="16" y2="23"/>
+                </svg>
+                {isSpeaking ? 'Mikrofon aktiv' : 'Sprechen'}
+              </button>
               {/* Tap-to-unmute fallback — shown when browser blocks audio autoplay (e.g. iOS) */}
               {p2pActive && audioBlocked && (
                 <button

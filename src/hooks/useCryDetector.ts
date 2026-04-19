@@ -66,6 +66,7 @@ export function useCryDetector(
 
     try {
       ctx = new AudioContext()
+      ctx.resume().catch(() => {})   // wake up if browser started it suspended
       const sampleRate = ctx.sampleRate          // typically 48000
       source  = ctx.createMediaStreamSource(new MediaStream([mediaStreamTrack]))
       analyser = ctx.createAnalyser()

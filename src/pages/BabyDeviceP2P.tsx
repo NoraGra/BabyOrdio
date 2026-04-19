@@ -22,8 +22,9 @@ import type { MonitorState } from '../hooks/useMonitorState'
 interface P2PHandoff {
   status:            WebRTCStatus
   transport:         WebRTCTransport
+  remoteStream:      MediaStream | null
   disconnect:        () => void
-  replaceVideoTrack: (track: MediaStreamTrack) => Promise<void>
+  replaceVideoTrack: (track: MediaStreamTrack | null) => Promise<void>
   replaceAudioTrack: (track: MediaStreamTrack) => Promise<void>
 }
 
@@ -61,6 +62,7 @@ export default function BabyDeviceP2P({
   const [showEndConfirm,  setShowEndConfirm]  = useState(false)
   const [nightMode,       setNightMode]       = useState(false)
   const [isSwitchingCam,  setIsSwitchingCam] = useState(false)
+  const [videoOff,        setVideoOff]        = useState(false)
   const [shareToast,      setShareToast]      = useState<string | null>(null)
   const videoRef      = useRef<HTMLVideoElement>(null)
   // Track current facing mode for mobile-compatible camera flip
@@ -165,9 +167,52 @@ export default function BabyDeviceP2P({
 
   const status             = p2pHandoff ? p2pHandoff.status             : ownWebRTC.status
   const transport          = p2pHandoff ? p2pHandoff.transport          : ownWebRTC.transport
+  const remoteStream       = p2pHandoff ? p2pHandoff.remoteStream       : ownWebRTC.remoteStream
   const disconnect         = p2pHandoff ? p2pHandoff.disconnect         : ownWebRTC.disconnect
   const replaceVideoTrack  = p2pHandoff ? p2pHandoff.replaceVideoTrack  : ownWebRTC.replaceVideoTrack
   const replaceAudioTrack  = p2pHandoff ? p2pHandoff.replaceAudioTrack  : ownWebRTC.replaceAudioTrack
+
+  // ── Play parent's audio (speak-to-baby) ─────────────────────────────────
+  // When parent enables mic, the audio track in remoteStream becomes active.
+  // We play it via a programmatic Audio element (separate from the video preview).
+  useEffect(() => {
+    if (!remoteStream) return
+    const audioTracks = remoteStream.getAudioTracks()
+    if (audioTracks.length === 0) return
+    const audio = new Audio()
+    audio.srcObject = new MediaStream(audioTracks)
+    audio.play().catch(() => {})
+    return () => {
+      audio.pause()
+      try { audio.srcObject = null } catch {}
+    }
+  }, [remoteStream])
+
+  // ── Video toggle (audio-only demo mode) ─────────────────────────────────
+  const toggleVideoOff = async () => {
+    if (videoOff) {
+      // Re-enable video: acquire fresh video track
+      try {
+        const newVidStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: facingModeRef.current, width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false,
+        })
+        const newVidTrack = newVidStream.getVideoTracks()[0]
+        if (newVidTrack) {
+          await replaceVideoTrack(newVidTrack).catch(e => console.warn('[P2P] replaceVideoTrack resume:', e))
+          localStream?.getVideoTracks().forEach(t => t.stop())
+          setLocalStream(new MediaStream([newVidTrack, ...(localStream?.getAudioTracks() ?? [])]))
+        }
+        setVideoOff(false)
+      } catch (e) { console.error('Video re-enable failed', e) }
+    } else {
+      // Disable video: stop + remove from P2P
+      await replaceVideoTrack(null).catch(e => console.warn('[P2P] replaceVideoTrack null:', e))
+      localStream?.getVideoTracks().forEach(t => t.stop())
+      setLocalStream(new MediaStream(localStream?.getAudioTracks() ?? []))
+      setVideoOff(true)
+    }
+  }
 
   // ── Flip camera ─────────────────────────────────────────────────────────
   // Uses facingMode toggle — works on mobile Chrome where enumerateDevices()
@@ -244,7 +289,19 @@ export default function BabyDeviceP2P({
     <div className={`screen baby-screen${nightMode ? ' baby-screen--night' : ''}`}>
 
       {/* ── Local camera preview ─────────────────────────────────────── */}
-      <video ref={videoRef} className="baby-preview" autoPlay playsInline muted />
+      <video ref={videoRef} className="baby-preview" autoPlay playsInline muted
+        style={{ visibility: videoOff ? 'hidden' : 'visible' }} />
+      {videoOff && (
+        <div className="video-off-screen">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none"
+            stroke="rgba(255,255,255,0.4)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+            <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+            <line x1="1" y1="1" x2="23" y2="23"/>
+          </svg>
+          <span>Nur Audio</span>
+        </div>
+      )}
 
       {/* ── Night mode overlay ───────────────────────────────────────── */}
       {nightMode && (
@@ -269,7 +326,7 @@ export default function BabyDeviceP2P({
               <button
                 className="flip-camera-btn"
                 onClick={flipCamera}
-                disabled={isSwitchingCam}
+                disabled={isSwitchingCam || videoOff}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
                   stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -278,6 +335,28 @@ export default function BabyDeviceP2P({
                   <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
                 </svg>
                 Kamera drehen
+              </button>
+              <button className="flip-camera-btn" onClick={toggleVideoOff}>
+                {videoOff ? (
+                  <>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                      stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                      <circle cx="12" cy="13" r="4"/>
+                    </svg>
+                    Video ein
+                  </>
+                ) : (
+                  <>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                      stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                      <line x1="1" y1="1" x2="23" y2="23"/>
+                      <path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h4a2 2 0 0 1 2 2v9.34"/>
+                      <circle cx="12" cy="13" r="4"/>
+                    </svg>
+                    Video aus
+                  </>
+                )}
               </button>
               <button className="flip-camera-btn" onClick={() => setNightMode(true)}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
