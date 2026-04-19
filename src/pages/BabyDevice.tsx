@@ -71,6 +71,7 @@ export default function BabyDevice({ code, onBack }: Props) {
     transport:        p2pTransport,
     disconnect:       p2pDisconnect,
     replaceVideoTrack: p2pReplaceVideoTrack,
+    replaceAudioTrack: p2pReplaceAudioTrack,
   } = useWebRTC({
     code,
     role:        'baby',
@@ -100,6 +101,19 @@ export default function BabyDevice({ code, onBack }: Props) {
     const id = setInterval(poll, 1000)
     return () => { alive = false; clearInterval(id) }
   }, [mode, code])
+
+  // ── Auto-switch when baby's own P2P is confirmed connected ────────────
+  // Parallel path to the KV upgrade signal: if P2P is live on our side,
+  // switch after 2 s regardless of whether the parent's KV signal arrived.
+  // This catches cases where the KV poll misses the upgradeRequest (timing).
+  useEffect(() => {
+    if (p2pStatus !== 'connected' || mode !== 'livekit') return
+    const id = setTimeout(() => {
+      isIntentionalSwitchRef.current = true
+      setMode('p2p')
+    }, 2000)
+    return () => clearTimeout(id)
+  }, [p2pStatus, mode])
 
   // ── Suppress LiveKit onDisconnected during intentional switch ─────────
   const handleDisconnected = useCallback(() => {
@@ -137,6 +151,7 @@ export default function BabyDevice({ code, onBack }: Props) {
           transport:         p2pTransport,
           disconnect:        p2pDisconnect,
           replaceVideoTrack: p2pReplaceVideoTrack,
+          replaceAudioTrack: p2pReplaceAudioTrack,
         }}
         onSwitchToLiveKit={() => {
           isIntentionalSwitchRef.current = false

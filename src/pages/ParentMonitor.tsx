@@ -168,10 +168,16 @@ function ParentRoom({
   })
 
   // P2P video + audio elements (separate — iOS requires muted video to autoplay)
-  const p2pVideoRef    = useRef<HTMLVideoElement>(null)
+  const p2pVideoRef    = useRef<HTMLVideoElement | null>(null)
   const p2pAudioRef    = useRef<HTMLAudioElement>(null)
   const p2pSwitchedRef = useRef(false)
   const [p2pActive, setP2pActive] = useState(false)
+  // p2pVideoEl tracks the video DOM element reactively (for analysis hooks)
+  const [p2pVideoEl, setP2pVideoEl] = useState<HTMLVideoElement | null>(null)
+  const p2pVideoCallbackRef = useCallback((el: HTMLVideoElement | null) => {
+    p2pVideoRef.current = el
+    setP2pVideoEl(el)
+  }, [])
 
   // Attach P2P tracks to their respective elements whenever the remote stream updates.
   // Video element is MUTED so iOS allows autoplay regardless of audio presence.
@@ -238,6 +244,12 @@ function ParentRoom({
     return () => clearTimeout(id)
   }, [p2pStatus, p2pRemoteStream, doSwitch])
 
+  // ── Parent viewer count ───────────────────────────────────────────────
+  // LiveKit mode: count remote participants with 'parent-' prefix + 1 for self
+  // P2P mode: always 1 (point-to-point)
+  const lkParentCount = remoteParticipants.filter(p => p.identity.startsWith('parent-')).length + 1
+  const viewerCount   = p2pActive ? 1 : lkParentCount
+
   // ── LiveKit connection quality ────────────────────────────────────────
   const [lkQuality, setLkQuality] = useState<ConnectionQuality>(ConnectionQuality.Excellent)
 
@@ -283,14 +295,25 @@ function ParentRoom({
   // ── Session recorder ──────────────────────────────────────────────────
   const recorder = useSessionRecorder(code)
 
+  // ── Analysis inputs: use P2P tracks when active, LiveKit tracks otherwise ──
+  // Audio: P2P mode → raw MediaStreamTrack from p2pRemoteStream
+  //        LiveKit mode → TrackReference from useTracks
+  // Video: P2P mode → direct HTMLVideoElement (p2pVideoEl state)
+  //        LiveKit mode → TrackReference from useTracks
+  const analysisAudioInput = p2pActive
+    ? (p2pRemoteStream?.getAudioTracks()[0] ?? undefined)
+    : (audioRef && isTrackReference(audioRef) ? audioRef : undefined)
+
+  const analysisVideoInput = p2pActive
+    ? p2pVideoEl
+    : (videoRef && isTrackReference(videoRef) ? videoRef : undefined)
+
   // ── Audio level ───────────────────────────────────────────────────────
-  const { stats: audioStats } = useAudioAnalyzer(
-    audioRef && isTrackReference(audioRef) ? audioRef : undefined,
-  )
+  const { stats: audioStats } = useAudioAnalyzer(analysisAudioInput)
 
   // ── Cry detector ──────────────────────────────────────────────────────
   const cryState = useCryDetector(
-    audioRef && isTrackReference(audioRef) ? audioRef : undefined,
+    analysisAudioInput,
     (level) => recorder.onCryStart(level),
     (level) => recorder.onCryPeak(level),
     () => recorder.onCryEnd(),
@@ -298,7 +321,7 @@ function ParentRoom({
 
   // ── Move detector ─────────────────────────────────────────────────────
   const moveState = useMoveDetector(
-    videoRef && isTrackReference(videoRef) ? videoRef : undefined,
+    analysisVideoInput,
     (intensity) => recorder.onMove(intensity),
   )
 
@@ -407,7 +430,7 @@ function ParentRoom({
               style={{ opacity: p2pActive ? 1 : 0 }}
             >
               <video
-                ref={p2pVideoRef}
+                ref={p2pVideoCallbackRef}
                 className="remote-video"
                 autoPlay
                 playsInline
@@ -434,6 +457,16 @@ function ParentRoom({
                 mode={p2pActive ? 'direct' : 'secured'}
                 transport={p2pActive ? p2pTransport : undefined}
               />
+              {viewerCount > 0 && (monitorState === 'connected' || monitorState === 'degraded') && (
+                <span className="parent-count-badge">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                    strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                    <circle cx="12" cy="12" r="3"/>
+                  </svg>
+                  {viewerCount}
+                </span>
+              )}
             </div>
             <div className="parent-header-right">
               {(monitorState === 'connected' || monitorState === 'degraded') && (
@@ -507,9 +540,10 @@ function ParentRoom({
                 </button>
               )}
               {/* Demo mode: simulate audio-only / degraded connection */}
+              {/* Hidden from UI but functionality kept for internal testing */}
               <button
                 className="speak-btn"
-                style={{ opacity: 0.55, fontSize: '0.7rem' }}
+                style={{ display: 'none' }}
                 onClick={(e) => { e.stopPropagation(); setDemoDegrade(d => !d) }}
                 title="Demo: Schwaches Signal simulieren"
               >

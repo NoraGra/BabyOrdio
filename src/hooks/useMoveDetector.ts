@@ -9,8 +9,12 @@ export interface MoveState {
 
 const EMPTY: MoveState = { isMoving: false, intensity: 0 }
 
+/** Video input: either a LiveKit TrackReference or a direct HTMLVideoElement (P2P mode) */
+export type VideoInput = TrackReference | HTMLVideoElement | undefined | null
+
 /**
  * Detects baby movement by comparing consecutive video frames.
+ * Accepts either a LiveKit TrackReference or a direct HTMLVideoElement (P2P mode).
  *
  * Algorithm:
  *  1. Draw video to an offscreen canvas every 200 ms (5 fps)
@@ -21,38 +25,32 @@ const EMPTY: MoveState = { isMoving: false, intensity: 0 }
  * Runs entirely in the browser. No ML model needed.
  */
 export function useMoveDetector(
-  trackRef: TrackReference | undefined,
+  input: VideoInput,
   onMove?: (intensity: number) => void,
 ) {
   const [state, setState] = useState<MoveState>(EMPTY)
-  const trackSid = trackRef?.publication?.trackSid
 
   const movingRef         = useRef(false)
   const moveTimerRef      = useRef<ReturnType<typeof setTimeout> | null>(null)
   const clearTimerRef     = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastFireRef       = useRef(0)  // throttle onMove callback
 
+  // Stable key for the effect dep:
+  // - HTMLVideoElement → 'direct-video' (re-runs when input goes null → element)
+  // - TrackReference → publication trackSid
+  // - null/undefined → 'none'
+  const effectKey = !input
+    ? 'none'
+    : input instanceof HTMLVideoElement
+      ? 'direct-video'
+      : (input as TrackReference).publication?.trackSid ?? 'pending'
+
   useEffect(() => {
-    // Wait briefly for the <video> element to be attached to the track
-    const attach = () => {
-      const track = trackRef?.publication?.track
-      if (!track) return null
-      // LiveKit attaches the track to HTMLVideoElements; grab the first one
-      const attachedEls = (track as any).attachedElements as HTMLVideoElement[] | undefined
-      return attachedEls?.[0] ?? null
-    }
+    if (!input) return
 
     let videoEl: HTMLVideoElement | null = null
     let intervalId: ReturnType<typeof setInterval> | null = null
-
-    // Wait up to 2 s for the video element to appear
-    const waitId = setInterval(() => {
-      videoEl = attach()
-      if (videoEl) {
-        clearInterval(waitId)
-        start(videoEl)
-      }
-    }, 200)
+    let waitId: ReturnType<typeof setInterval> | null = null
 
     const canvas  = document.createElement('canvas')
     const ctx2d   = canvas.getContext('2d', { willReadFrequently: true })
@@ -122,8 +120,29 @@ export function useMoveDetector(
       }, 200)  // 5 fps
     }
 
+    if (input instanceof HTMLVideoElement) {
+      // P2P mode: use the video element directly, no waiting needed
+      videoEl = input
+      start(videoEl)
+    } else {
+      // LiveKit mode: wait for the track to attach to a <video> element
+      const trackRef = input as TrackReference
+      waitId = setInterval(() => {
+        const track = trackRef.publication?.track
+        if (!track) return
+        // LiveKit attaches the track to HTMLVideoElements; grab the first one
+        const attachedEls = (track as any).attachedElements as HTMLVideoElement[] | undefined
+        videoEl = attachedEls?.[0] ?? null
+        if (videoEl) {
+          clearInterval(waitId!)
+          waitId = null
+          start(videoEl)
+        }
+      }, 200)
+    }
+
     return () => {
-      clearInterval(waitId)
+      if (waitId !== null) clearInterval(waitId)
       if (intervalId)         clearInterval(intervalId)
       if (moveTimerRef.current)  clearTimeout(moveTimerRef.current)
       if (clearTimerRef.current) clearTimeout(clearTimerRef.current)
@@ -132,7 +151,7 @@ export function useMoveDetector(
       movingRef.current     = false
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trackSid])
+  }, [effectKey])
 
   return state
 }

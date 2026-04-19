@@ -62,6 +62,7 @@ export interface WebRTCResult {
   remoteStream:       MediaStream | null
   disconnect:         () => void
   replaceVideoTrack:  (track: MediaStreamTrack) => Promise<void>
+  replaceAudioTrack:  (track: MediaStreamTrack) => Promise<void>
 }
 
 interface Options {
@@ -138,6 +139,13 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
     const pc = pcRef.current
     if (!pc) return
     const sender = pc.getSenders().find(s => s.track?.kind === 'video')
+    if (sender) await sender.replaceTrack(newTrack)
+  }, [])
+
+  const replaceAudioTrack = useCallback(async (newTrack: MediaStreamTrack) => {
+    const pc = pcRef.current
+    if (!pc) return
+    const sender = pc.getSenders().find(s => s.track?.kind === 'audio')
     if (sender) await sender.replaceTrack(newTrack)
   }, [])
 
@@ -359,5 +367,5 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
     }
   }, [code, role, localStream, enabled, stopPolling])  // eslint-disable-line react-hooks/exhaustive-deps
 
-  return { status, transport, remoteStream, disconnect, replaceVideoTrack }
+  return { status, transport, remoteStream, disconnect, replaceVideoTrack, replaceAudioTrack }
 }

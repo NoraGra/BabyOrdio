@@ -27,12 +27,28 @@ const ACTIVITY_ON  = 6
 /** Hysteresis: level must fall below this before next activity is counted */
 const ACTIVITY_OFF = 4
 
+/** Audio input: either a LiveKit TrackReference or a raw MediaStreamTrack (P2P mode) */
+export type AudioInput = TrackReference | MediaStreamTrack | undefined
+
+function resolveMediaTrack(input: AudioInput): MediaStreamTrack | undefined {
+  if (!input) return undefined
+  if (input instanceof MediaStreamTrack) return input
+  return (input as TrackReference).publication?.track?.mediaStreamTrack
+}
+
+function resolveKey(input: AudioInput): string | undefined {
+  if (!input) return undefined
+  if (input instanceof MediaStreamTrack) return input.id
+  return (input as TrackReference).publication?.trackSid
+}
+
 /**
- * Analyzes the audio level of an incoming audio TrackReference.
+ * Analyzes the audio level of an incoming audio track.
+ * Accepts either a LiveKit TrackReference or a raw MediaStreamTrack (P2P mode).
  * Uses the Web Audio API AnalyserNode — does not affect existing playback.
  * Polls at ~10 Hz.
  */
-export function useAudioAnalyzer(trackRef: TrackReference | undefined) {
+export function useAudioAnalyzer(input: AudioInput) {
   const [stats, setStats] = useState<AudioStats>(EMPTY_STATS)
 
   // Accumulation lives in a ref to avoid triggering re-renders on every frame
@@ -50,11 +66,11 @@ export function useAudioAnalyzer(trackRef: TrackReference | undefined) {
     setStats(EMPTY_STATS)
   }, [])
 
-  // Track SID as dep so effect re-runs when the track is replaced
-  const trackSid = trackRef?.publication?.trackSid
+  // Key changes when the track changes (TrackReference → trackSid, MediaStreamTrack → track.id)
+  const trackKey = resolveKey(input)
 
   useEffect(() => {
-    const mediaStreamTrack = trackRef?.publication?.track?.mediaStreamTrack
+    const mediaStreamTrack = resolveMediaTrack(input)
     if (!mediaStreamTrack) return
 
     let ctx: AudioContext | null = null
@@ -64,7 +80,7 @@ export function useAudioAnalyzer(trackRef: TrackReference | undefined) {
 
     try {
       ctx = new AudioContext()
-      // Create a fresh MediaStream from the track so we don't disturb LiveKit's playback
+      // Create a fresh MediaStream from the track so we don't disturb existing playback
       source = ctx.createMediaStreamSource(new MediaStream([mediaStreamTrack]))
       analyser = ctx.createAnalyser()
       analyser.fftSize = 256
@@ -121,7 +137,7 @@ export function useAudioAnalyzer(trackRef: TrackReference | undefined) {
       ctx?.close().catch(() => {})
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trackSid])
+  }, [trackKey])
 
   return { stats, resetStats }
 }

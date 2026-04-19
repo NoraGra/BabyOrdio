@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { TrackReference } from '@livekit/components-react'
+import type { AudioInput } from './useAudioAnalyzer'
 
 export interface CryState {
   isCrying: boolean
@@ -11,8 +12,21 @@ export interface CryState {
 
 const EMPTY: CryState = { isCrying: false, confidence: 0, level: 0 }
 
+function resolveMediaTrack(input: AudioInput): MediaStreamTrack | undefined {
+  if (!input) return undefined
+  if (input instanceof MediaStreamTrack) return input
+  return (input as TrackReference).publication?.track?.mediaStreamTrack
+}
+
+function resolveKey(input: AudioInput): string | undefined {
+  if (!input) return undefined
+  if (input instanceof MediaStreamTrack) return input.id
+  return (input as TrackReference).publication?.trackSid
+}
+
 /**
  * Detects baby crying using Web Audio API frequency analysis.
+ * Accepts either a LiveKit TrackReference or a raw MediaStreamTrack (P2P mode).
  *
  * Algorithm:
  *  1. Split audio into frequency bands using FFT
@@ -27,13 +41,13 @@ const EMPTY: CryState = { isCrying: false, confidence: 0, level: 0 }
  * needed, runs entirely in the browser at ~10 Hz.
  */
 export function useCryDetector(
-  trackRef: TrackReference | undefined,
+  input: AudioInput,
   onCryStart?: (level: number) => void,
   onCryPeak?: (level: number) => void,
   onCryEnd?: () => void,
 ) {
   const [state, setState] = useState<CryState>(EMPTY)
-  const trackSid = trackRef?.publication?.trackSid
+  const trackKey = resolveKey(input)
 
   // Refs for edge-detection timers
   const cryingRef     = useRef(false)
@@ -42,7 +56,7 @@ export function useCryDetector(
   const peakRef       = useRef(0)
 
   useEffect(() => {
-    const mediaStreamTrack = trackRef?.publication?.track?.mediaStreamTrack
+    const mediaStreamTrack = resolveMediaTrack(input)
     if (!mediaStreamTrack) return
 
     let ctx: AudioContext | null = null
@@ -160,7 +174,7 @@ export function useCryDetector(
       cryingRef.current     = false
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trackSid])
+  }, [trackKey])
 
   return state
 }

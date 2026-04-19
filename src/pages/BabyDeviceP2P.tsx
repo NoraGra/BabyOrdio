@@ -24,6 +24,7 @@ interface P2PHandoff {
   transport:         WebRTCTransport
   disconnect:        () => void
   replaceVideoTrack: (track: MediaStreamTrack) => Promise<void>
+  replaceAudioTrack: (track: MediaStreamTrack) => Promise<void>
 }
 
 interface Props {
@@ -67,40 +68,48 @@ export default function BabyDeviceP2P({
 
   useWakeLock()
 
-  // ── Refresh video track on P2P handoff ───────────────────────────────
-  // When LiveKit disconnects (mode switch to P2P), it stops the underlying
-  // MediaStreamTrack even with userProvidedTrack=true. The handed-off
-  // camStream video track is therefore `ended` and produces no frames.
-  // Solution: immediately re-acquire a fresh video track, replace it in the
-  // P2P connection, and update the local preview — exactly what manual
-  // camera-flip did, but automatic.
+  // ── Refresh video + audio tracks on P2P handoff ──────────────────────
+  // When LiveKit disconnects (mode switch to P2P), it stops ALL underlying
+  // MediaStreamTracks even with userProvidedTrack=true — both video and audio.
+  // The handed-off camStream tracks are therefore `ended` and produce no frames/audio.
+  // Solution: re-acquire a fresh video + audio stream, replace both senders
+  // in the P2P connection, and update the local preview.
   useEffect(() => {
     if (!p2pHandoff) return  // standalone mode — no refresh needed
     let alive = true
 
     navigator.mediaDevices.getUserMedia({
       video: { facingMode: facingModeRef.current, width: { ideal: 1280 }, height: { ideal: 720 } },
-      audio: false,
+      audio: true,
     })
       .then(async newStream => {
         if (!alive) { newStream.getTracks().forEach(t => t.stop()); return }
         const newVideoTrack = newStream.getVideoTracks()[0]
+        const newAudioTrack = newStream.getAudioTracks()[0]
 
-        // Replace in the active P2P connection (triggers fresh keyframes → parent wakes up)
-        await p2pHandoff.replaceVideoTrack(newVideoTrack).catch(e => console.warn('[P2P] replaceTrack on refresh:', e))
+        // Replace both tracks in the active P2P connection
+        if (newVideoTrack) {
+          await p2pHandoff.replaceVideoTrack(newVideoTrack).catch(e => console.warn('[P2P] replaceVideoTrack on refresh:', e))
+        }
+        if (newAudioTrack) {
+          await p2pHandoff.replaceAudioTrack(newAudioTrack).catch(e => console.warn('[P2P] replaceAudioTrack on refresh:', e))
+        }
 
-        // Stop the old (potentially ended) video track
+        // Stop the old (potentially ended) tracks
         initialStream?.getVideoTracks().forEach(t => t.stop())
+        initialStream?.getAudioTracks().forEach(t => t.stop())
 
         if (alive) {
-          // Rebuild stream: new video + original audio (audio is still live)
-          const audioTracks = initialStream?.getAudioTracks() ?? []
-          setLocalStream(new MediaStream([newVideoTrack, ...audioTracks]))
+          const tracks = [
+            ...(newVideoTrack ? [newVideoTrack] : []),
+            ...(newAudioTrack ? [newAudioTrack] : []),
+          ]
+          setLocalStream(new MediaStream(tracks))
         } else {
-          newVideoTrack.stop()
+          newStream.getTracks().forEach(t => t.stop())
         }
       })
-      .catch(err => console.error('[P2P] camera refresh failed:', err))
+      .catch(err => console.error('[P2P] stream refresh failed:', err))
 
     return () => { alive = false }
   }, [])  // eslint-disable-line react-hooks/exhaustive-deps — intentional one-shot on mount
@@ -158,6 +167,7 @@ export default function BabyDeviceP2P({
   const transport          = p2pHandoff ? p2pHandoff.transport          : ownWebRTC.transport
   const disconnect         = p2pHandoff ? p2pHandoff.disconnect         : ownWebRTC.disconnect
   const replaceVideoTrack  = p2pHandoff ? p2pHandoff.replaceVideoTrack  : ownWebRTC.replaceVideoTrack
+  const replaceAudioTrack  = p2pHandoff ? p2pHandoff.replaceAudioTrack  : ownWebRTC.replaceAudioTrack
 
   // ── Flip camera ─────────────────────────────────────────────────────────
   // Uses facingMode toggle — works on mobile Chrome where enumerateDevices()
