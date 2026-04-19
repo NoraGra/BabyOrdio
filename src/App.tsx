@@ -22,7 +22,10 @@ interface SavedSession { data: SessionData; stats: SessionStats }
 function getInitialScreen(): Screen {
   const params = new URLSearchParams(window.location.search)
   const code = params.get('code')
-  if (code && /^\d{6}$/.test(code)) return { view: 'parent-monitor', code }
+  // Accept both legacy 6-digit codes and new 8-char alphanumeric codes
+  if (code && (/^[a-z0-9]{8}$/.test(code) || /^\d{6}$/.test(code))) {
+    return { view: 'parent-monitor', code }
+  }
   return { view: 'home' }
 }
 

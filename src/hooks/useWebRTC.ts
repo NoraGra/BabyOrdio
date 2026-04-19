@@ -209,7 +209,9 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
       }
 
       // Baby: detect mode switch requested by parent
-      if (role === 'baby' && s.mode === 'livekit' && onModeSwitch) {
+      // Only react AFTER remote description is set — prevents false trigger
+      // from stale 'livekit' mode left in KV by a previous session
+      if (role === 'baby' && s.mode === 'livekit' && remoteDescSetRef.current && onModeSwitch) {
         onModeSwitch('livekit')
         return   // stop further P2P processing
       }

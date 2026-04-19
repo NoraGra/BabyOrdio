@@ -10,8 +10,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { room, role } = req.query
 
   // --- Validate inputs ---
-  if (!room || typeof room !== 'string' || !/^\d{6}$/.test(room)) {
-    return res.status(400).json({ error: 'room must be a 6-digit number' })
+  if (!room || typeof room !== 'string' || !/^[a-z0-9]{8}$/.test(room)) {
+    return res.status(400).json({ error: 'room must be an 8-character alphanumeric code' })
   }
   if (role !== 'baby' && role !== 'parent') {
     return res.status(400).json({ error: 'role must be "baby" or "parent"' })
@@ -36,9 +36,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   at.addGrant({
     roomJoin: true,
     room,
-    // Baby can publish audio + video; parent only subscribes
-    canPublish: role === 'baby',
-    canSubscribe: true, // parent needs this; baby harmlessly has it too
+    // Baby publishes camera + mic; parent publishes mic only (talk-to-baby)
+    canPublish: true,
+    canSubscribe: true,
     canPublishData: false,
   })
 

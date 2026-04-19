@@ -8,8 +8,13 @@ interface Props {
   onViewAnalysis?: () => void
 }
 
+// 8-char alphanumeric — 36^8 ≈ 2.8 trillion combos (brute-force unfeasible)
+// Excludes visually confusable chars: 0/o, 1/i/l
+const CODE_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789'
 function generateCode(): string {
-  return String(Math.floor(100000 + Math.random() * 900000))
+  return Array.from({ length: 8 }, () =>
+    CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]
+  ).join('')
 }
 
 export default function Home({ onSelectBaby, onSelectParent, onViewAnalysis }: Props) {
@@ -22,6 +27,7 @@ export default function Home({ onSelectBaby, onSelectParent, onViewAnalysis }: P
           <span className="home-logo-baby">baby</span>
           <span className="home-logo-ordio">ordio</span>
         </p>
+        <p className="home-tagline">Ganz nah bei deinem Baby –<br/>auch wenn du es gerade nicht bist.</p>
       </div>
 
       {/* Role cards */}
@@ -42,14 +48,12 @@ export default function Home({ onSelectBaby, onSelectParent, onViewAnalysis }: P
           </button>
         </div>
 
-        {/* Step 2 — Parent device (dimmed, not clickable) */}
-        <div className="role-card-wrapper role-card-wrapper--disabled">
-          <span className="role-card-step">2. Wenn du das Baby-Gerät eingerichtet hast, kannst du dieses einrichten:</span>
+        {/* Step 2 — Parent device */}
+        <div className="role-card-wrapper">
+          <span className="role-card-step">2. Dann hier verbinden:</span>
           <button
             className="role-card"
             onClick={onSelectParent}
-            tabIndex={-1}
-            aria-disabled="true"
           >
             <div className="role-card-art">
               <ParentIcon size={76} />

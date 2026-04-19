@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import {
   LiveKitRoom,
   useConnectionState,
+  useLocalParticipant,
   useRemoteParticipants,
   useRoomContext,
   useTracks,
@@ -26,6 +27,7 @@ import AudioOnlyView      from '../components/AudioOnlyView'
 import SummaryBanner      from '../components/SummaryBanner'
 import HelpButton         from '../components/HelpButton'
 import AnalysisDashboard  from './AnalysisDashboard'
+import ParentMonitorP2P   from './ParentMonitorP2P'
 
 const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL as string
 
@@ -33,9 +35,29 @@ interface Props {
   code: string
   onBack: () => void
   onSessionEnd: (data: SessionData, stats: SessionStats) => void
+  transport?: 'p2p' | 'livekit'
 }
 
-export default function ParentMonitor({ code, onBack, onSessionEnd }: Props) {
+export default function ParentMonitor({ code, onBack, onSessionEnd, transport = 'p2p' }: Props) {
+  const [mode, setMode] = useState<'p2p' | 'livekit'>(transport)
+
+  // P2P mode — native WebRTC, no LiveKit
+  if (mode === 'p2p') {
+    return (
+      <ParentMonitorP2P
+        code={code}
+        onBack={onBack}
+        onSwitchToLiveKit={() => setMode('livekit')}
+      />
+    )
+  }
+
+  // LiveKit mode — original implementation with full analysis
+  return <LiveKitParentMonitor code={code} onBack={onBack} onSessionEnd={onSessionEnd} />
+}
+
+// ── LiveKit parent monitor (original, unchanged) ──────────────────────────
+function LiveKitParentMonitor({ code, onBack, onSessionEnd }: Omit<Props, 'transport'>) {
   const tokenState = useToken(code, 'parent')
 
   if (!LIVEKIT_URL) {
@@ -83,8 +105,9 @@ function ParentRoom({
   onBack: () => void
   onSessionEnd: (data: SessionData, stats: SessionStats) => void
 }) {
-  const connectionState    = useConnectionState()
-  const remoteParticipants = useRemoteParticipants()
+  const connectionState       = useConnectionState()
+  const remoteParticipants    = useRemoteParticipants()
+  const { localParticipant }  = useLocalParticipant()
   const hasBaby = remoteParticipants.length > 0
 
   const videoTracks = useTracks([Track.Source.Camera],     { onlySubscribed: true })
@@ -179,6 +202,26 @@ function ParentRoom({
   // ── Connection disruption summary ─────────────────────────────────────
   const { summary, clearSummary } = useConnectionLog(monitorState, audioStats)
 
+  // ── Talk-to-baby (two-way audio) ─────────────────────────────────────
+  const [isSpeaking, setIsSpeaking] = useState(false)
+
+  const toggleSpeak = useCallback(async () => {
+    try {
+      if (isSpeaking) {
+        await localParticipant.setMicrophoneEnabled(false)
+        setIsSpeaking(false)
+      } else {
+        await localParticipant.setMicrophoneEnabled(true)
+        setIsSpeaking(true)
+      }
+    } catch (e) {
+      console.error('Mic toggle failed:', e)
+    }
+  }, [isSpeaking, localParticipant])
+
+  // ── End session confirm ───────────────────────────────────────────────
+  const [showEndConfirm, setShowEndConfirm] = useState(false)
+
   // ── Dashboard overlay (session stays alive!) ──────────────────────────
   const [showDashboard, setShowDashboard] = useState(false)
   const prevMonitorRef = useRef(monitorState)
@@ -234,9 +277,9 @@ function ParentRoom({
               )}
               <button
                 className="end-circle-btn end-circle-btn--labeled"
-                onClick={(e) => { e.stopPropagation(); handleEnd() }}
-                title="Session beenden"
-                aria-label="Session beenden"
+                onClick={(e) => { e.stopPropagation(); setShowEndConfirm(true) }}
+                title="Session verlassen"
+                aria-label="Session verlassen"
               >
                 <span className="end-circle-label">Session verlassen</span>
                 <span className="end-circle-icon">✕</span>
@@ -244,7 +287,7 @@ function ParentRoom({
             </div>
           </div>
 
-          {/* BOTTOM LEFT: live indicators stacked above Analyse button */}
+          {/* BOTTOM LEFT: live indicators stacked above Analyse + Speak buttons */}
           <div className="parent-bottom-left">
             {moveState.isMoving && (
               <div className="live-indicator live-indicator--move">
@@ -254,12 +297,27 @@ function ParentRoom({
             {cryState.isCrying && (
               <div className="live-indicator live-indicator--cry">😢 Weint gerade</div>
             )}
-            <button
-              className="analyse-btn"
-              onClick={(e) => { e.stopPropagation(); setShowDashboard(true) }}
-            >
-              Analyse
-            </button>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <button
+                className="analyse-btn"
+                onClick={(e) => { e.stopPropagation(); setShowDashboard(true) }}
+              >
+                Analyse
+              </button>
+              <button
+                className={`speak-btn${isSpeaking ? ' speak-btn--active' : ''}`}
+                onClick={(e) => { e.stopPropagation(); toggleSpeak() }}
+                aria-label={isSpeaking ? 'Mikrofon deaktivieren' : 'Mit Baby sprechen'}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                  <line x1="12" y1="19" x2="12" y2="23"/>
+                  <line x1="8" y1="23" x2="16" y2="23"/>
+                </svg>
+                {isSpeaking ? 'Mikrofon aktiv' : 'Sprechen'}
+              </button>
+            </div>
           </div>
 
         </div>
@@ -296,6 +354,24 @@ function ParentRoom({
           </div>
         )}
       </div>
+
+      {/* ── End session confirm ── */}
+      {showEndConfirm && (
+        <div className="parent-confirm-overlay" onClick={() => setShowEndConfirm(false)}>
+          <div className="parent-confirm-sheet" onClick={(e) => e.stopPropagation()}>
+            <p className="confirm-title">Session verlassen?</p>
+            <p className="confirm-body">Du verlässt die Session. Das Baby-Gerät bleibt aktiv.</p>
+            <div className="confirm-actions">
+              <button className="confirm-btn confirm-btn--danger" onClick={() => { setShowEndConfirm(false); handleEnd() }}>
+                Ja, verlassen
+              </button>
+              <button className="confirm-btn confirm-btn--cancel" onClick={() => setShowEndConfirm(false)}>
+                Abbrechen
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Dashboard overlay — rendered ON TOP, LiveKit untouched ── */}
       {showDashboard && (
