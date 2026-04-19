@@ -1,3 +1,16 @@
+/**
+ * ParentMonitor — parent-side live view
+ *
+ * Architecture:
+ * 1. Always starts in LiveKit mode (fast, reliable)
+ * 2. Background P2P probe runs silently (data-channel ICE test)
+ * 3. When probe succeeds, full P2P media connection starts in background
+ * 4. When P2P video first frame is ready (onCanPlay):
+ *    - CSS crossfade: LiveKit video fades out, P2P video fades in (600ms)
+ *    - After fade: LiveKit disconnects (intentionally — no onBack())
+ *    - Baby is signalled via KV to also switch
+ * 5. Zero gap in video — both streams overlap during fade
+ */
 import { useState, useCallback, useEffect, useRef } from 'react'
 import {
   LiveKitRoom,
@@ -26,8 +39,10 @@ import SessionTimer       from '../components/SessionTimer'
 import AudioOnlyView      from '../components/AudioOnlyView'
 import SummaryBanner      from '../components/SummaryBanner'
 import HelpButton         from '../components/HelpButton'
+import ModeBadge          from '../components/ModeBadge'
 import AnalysisDashboard  from './AnalysisDashboard'
-import ParentMonitorP2P   from './ParentMonitorP2P'
+import { useP2PProbe }    from '../hooks/useP2PProbe'
+import { useWebRTC, postSignal } from '../hooks/useWebRTC'
 
 const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL as string
 
@@ -38,26 +53,39 @@ interface Props {
   transport?: 'p2p' | 'livekit'
 }
 
-export default function ParentMonitor({ code, onBack, onSessionEnd, transport = 'p2p' }: Props) {
-  const [mode, setMode] = useState<'p2p' | 'livekit'>(transport)
+export default function ParentMonitor({ code, onBack, onSessionEnd }: Props) {
+  // P2P probe runs at top level — passed down to ParentRoom inside LiveKit context
+  const probeStatus = useP2PProbe(code, 'parent')
 
-  // P2P mode — native WebRTC, no LiveKit
-  if (mode === 'p2p') {
-    return (
-      <ParentMonitorP2P
-        code={code}
-        onBack={onBack}
-        onSwitchToLiveKit={() => setMode('livekit')}
-      />
-    )
-  }
+  // intentionalSwitchRef prevents LiveKit onDisconnected → onBack() during P2P crossfade
+  const intentionalSwitchRef = useRef(false)
 
-  // LiveKit mode — original implementation with full analysis
-  return <LiveKitParentMonitor code={code} onBack={onBack} onSessionEnd={onSessionEnd} />
+  const handleDisconnected = useCallback(() => {
+    if (!intentionalSwitchRef.current) onBack()
+  }, [onBack])
+
+  return (
+    <LiveKitParentMonitor
+      code={code}
+      onBack={onBack}
+      onSessionEnd={onSessionEnd}
+      probeStatus={probeStatus}
+      intentionalSwitchRef={intentionalSwitchRef}
+      onDisconnected={handleDisconnected}
+    />
+  )
 }
 
-// ── LiveKit parent monitor (original, unchanged) ──────────────────────────
-function LiveKitParentMonitor({ code, onBack, onSessionEnd }: Omit<Props, 'transport'>) {
+// ── LiveKit wrapper ───────────────────────────────────────────────────────
+interface InnerProps extends Omit<Props, 'transport'> {
+  probeStatus:         'checking' | 'available' | 'unavailable'
+  intentionalSwitchRef: React.MutableRefObject<boolean>
+  onDisconnected:      () => void
+}
+
+function LiveKitParentMonitor({
+  code, onBack, onSessionEnd, probeStatus, intentionalSwitchRef, onDisconnected,
+}: InnerProps) {
   const tokenState = useToken(code, 'parent')
 
   if (!LIVEKIT_URL) {
@@ -89,25 +117,36 @@ function LiveKitParentMonitor({ code, onBack, onSessionEnd }: Omit<Props, 'trans
       connect
       audio={false}
       video={false}
-      onDisconnected={onBack}
+      onDisconnected={onDisconnected}
     >
-      <ParentRoom code={code} onBack={onBack} onSessionEnd={onSessionEnd} />
+      <ParentRoom
+        code={code}
+        onBack={onBack}
+        onSessionEnd={onSessionEnd}
+        probeStatus={probeStatus}
+        intentionalSwitchRef={intentionalSwitchRef}
+      />
     </LiveKitRoom>
   )
 }
 
+// ── ParentRoom (inside LiveKit context) ───────────────────────────────────
 function ParentRoom({
   code,
   onBack,
   onSessionEnd,
+  probeStatus,
+  intentionalSwitchRef,
 }: {
   code: string
   onBack: () => void
   onSessionEnd: (data: SessionData, stats: SessionStats) => void
+  probeStatus: 'checking' | 'available' | 'unavailable'
+  intentionalSwitchRef: React.MutableRefObject<boolean>
 }) {
-  const connectionState       = useConnectionState()
-  const remoteParticipants    = useRemoteParticipants()
-  const { localParticipant }  = useLocalParticipant()
+  const connectionState    = useConnectionState()
+  const remoteParticipants = useRemoteParticipants()
+  const { localParticipant } = useLocalParticipant()
   const hasBaby = remoteParticipants.length > 0
 
   const videoTracks = useTracks([Track.Source.Camera],     { onlySubscribed: true })
@@ -115,10 +154,50 @@ function ParentRoom({
   const videoRef = videoTracks.find(t => isTrackReference(t))
   const audioRef = audioTracks.find(t => isTrackReference(t))
 
-  const monitorState = deriveMonitorState(connectionState, hasBaby, !!videoRef, !!audioRef)
+  // ── P2P background connection ─────────────────────────────────────────
+  const {
+    status:       p2pStatus,
+    transport:    p2pTransport,
+    remoteStream: p2pRemoteStream,
+  } = useWebRTC({
+    code,
+    role:        'parent',
+    localStream: null,
+    enabled:     probeStatus === 'available',
+  })
 
-  // ── Connection quality (per track) ───────────────────────────────────
+  // P2P video element
+  const p2pVideoRef   = useRef<HTMLVideoElement>(null)
+  const p2pSwitchedRef = useRef(false)
+  const [p2pActive, setP2pActive] = useState(false)
+
+  // Attach P2P stream to video element
+  useEffect(() => {
+    if (p2pVideoRef.current && p2pRemoteStream) {
+      p2pVideoRef.current.srcObject = p2pRemoteStream
+    }
+  }, [p2pRemoteStream])
+
+  // Seamless crossfade when P2P video has its first frame
   const room = useRoomContext()
+  const handleP2PCanPlay = useCallback(async () => {
+    if (p2pSwitchedRef.current || p2pActive) return
+    p2pSwitchedRef.current = true
+
+    // Signal baby to also switch modes
+    await postSignal(code, 'upgrade', 'p2p')
+
+    // Start visual crossfade (CSS transition handles the animation)
+    setP2pActive(true)
+
+    // After fade completes, disconnect LiveKit (intentional — no onBack())
+    setTimeout(() => {
+      intentionalSwitchRef.current = true
+      room.disconnect()
+    }, 650)
+  }, [code, p2pActive, room, intentionalSwitchRef])
+
+  // ── LiveKit connection quality ────────────────────────────────────────
   const [lkQuality, setLkQuality] = useState<ConnectionQuality>(ConnectionQuality.Excellent)
 
   useEffect(() => {
@@ -130,33 +209,42 @@ function ParentRoom({
     return () => { room.off(RoomEvent.ConnectionQualityChanged, handler) }
   }, [room])
 
-  // Map LiveKit quality + track presence → 0–3 scale
   const toLevel = (q: ConnectionQuality, hasTrack: boolean): QualityLevel => {
     if (!hasTrack) return 0
     if (q === ConnectionQuality.Excellent) return 3
     if (q === ConnectionQuality.Good)      return 2
-    return 1  // Poor / Lost
+    return 1
   }
-
-  // Audio is prioritised: Good → still 3 bars; Poor → 2 bars
   const toAudioLevel = (q: ConnectionQuality, hasTrack: boolean): QualityLevel => {
     if (!hasTrack) return 0
     if (q === ConnectionQuality.Excellent || q === ConnectionQuality.Good) return 3
-    return 2  // Poor — audio may still be partially ok
+    return 2
   }
 
   const videoQuality = toLevel(lkQuality, !!videoRef)
   const audioQuality = toAudioLevel(lkQuality, !!audioRef)
 
-  // ── Session recorder (runs for the whole session) ────────────────────
+  // ── Monitor state ─────────────────────────────────────────────────────
+  const lkMonitorState = deriveMonitorState(connectionState, hasBaby, !!videoRef, !!audioRef)
+
+  // After P2P switch, use P2P status for display (LK is intentionally disconnected)
+  const p2pMonitorState = (() => {
+    if (p2pStatus === 'connected')    return 'connected'    as const
+    if (p2pStatus === 'reconnecting') return 'reconnecting' as const
+    if (p2pStatus === 'failed' || p2pStatus === 'closed') return 'critical' as const
+    return 'connecting' as const
+  })()
+  const monitorState = p2pActive ? p2pMonitorState : lkMonitorState
+
+  // ── Session recorder ──────────────────────────────────────────────────
   const recorder = useSessionRecorder(code)
 
-  // ── Audio level ──────────────────────────────────────────────────────
+  // ── Audio level ───────────────────────────────────────────────────────
   const { stats: audioStats } = useAudioAnalyzer(
     audioRef && isTrackReference(audioRef) ? audioRef : undefined,
   )
 
-  // ── Cry detector ─────────────────────────────────────────────────────
+  // ── Cry detector ──────────────────────────────────────────────────────
   const cryState = useCryDetector(
     audioRef && isTrackReference(audioRef) ? audioRef : undefined,
     (level) => recorder.onCryStart(level),
@@ -164,13 +252,13 @@ function ParentRoom({
     () => recorder.onCryEnd(),
   )
 
-  // ── Move detector ────────────────────────────────────────────────────
+  // ── Move detector ─────────────────────────────────────────────────────
   const moveState = useMoveDetector(
     videoRef && isTrackReference(videoRef) ? videoRef : undefined,
     (intensity) => recorder.onMove(intensity),
   )
 
-  // ── Alert sounds + connection event recording ─────────────────────────
+  // ── Alert sounds + connection events ──────────────────────────────────
   const { playWarning, playCritical } = useAlertSound()
   const prevStateRef = useRef(monitorState)
 
@@ -202,7 +290,7 @@ function ParentRoom({
   // ── Connection disruption summary ─────────────────────────────────────
   const { summary, clearSummary } = useConnectionLog(monitorState, audioStats)
 
-  // ── Talk-to-baby (two-way audio) ─────────────────────────────────────
+  // ── Talk-to-baby ──────────────────────────────────────────────────────
   const [isSpeaking, setIsSpeaking] = useState(false)
 
   const toggleSpeak = useCallback(async () => {
@@ -222,17 +310,14 @@ function ParentRoom({
   // ── End session confirm ───────────────────────────────────────────────
   const [showEndConfirm, setShowEndConfirm] = useState(false)
 
-  // ── Dashboard overlay (session stays alive!) ──────────────────────────
+  // ── Dashboard overlay ─────────────────────────────────────────────────
   const [showDashboard, setShowDashboard] = useState(false)
   const prevMonitorRef = useRef(monitorState)
 
-  // Auto-open dashboard when video drops to degraded
   useEffect(() => {
     const prev = prevMonitorRef.current
     prevMonitorRef.current = monitorState
-    if (prev !== 'degraded' && monitorState === 'degraded') {
-      setShowDashboard(true)
-    }
+    if (prev !== 'degraded' && monitorState === 'degraded') setShowDashboard(true)
   }, [monitorState])
 
   // ── End session ───────────────────────────────────────────────────────
@@ -242,21 +327,44 @@ function ParentRoom({
     onBack()
   }, [recorder, onSessionEnd, onBack])
 
-  // Controls are always visible — no auto-hide
-
   return (
     <>
-      {/* ── Live monitor (always mounted = LiveKit stays connected) ── */}
       <div className="screen parent-screen">
-        {audioRef && isTrackReference(audioRef) && (
+
+        {/* LiveKit audio — stop when P2P is active (P2P video plays its own audio) */}
+        {audioRef && isTrackReference(audioRef) && !p2pActive && (
           <AudioTrack trackRef={audioRef} />
         )}
 
+        {/* ── Dual video layers — crossfade between LiveKit and P2P ──── */}
         <div className="video-container">
-          {videoRef && isTrackReference(videoRef) ? (
-            <VideoTrack trackRef={videoRef} className="remote-video" />
-          ) : (
-            <AudioOnlyView waiting={!hasBaby} />
+
+          {/* LiveKit video layer — fades out when P2P takes over */}
+          <div
+            className="video-layer"
+            style={{ opacity: p2pActive ? 0 : 1 }}
+          >
+            {videoRef && isTrackReference(videoRef) ? (
+              <VideoTrack trackRef={videoRef} className="remote-video" />
+            ) : (
+              <AudioOnlyView waiting={!hasBaby && !p2pActive} />
+            )}
+          </div>
+
+          {/* P2P video layer — fades in when ready (always rendered once stream exists) */}
+          {p2pRemoteStream && (
+            <div
+              className="video-layer"
+              style={{ opacity: p2pActive ? 1 : 0 }}
+            >
+              <video
+                ref={p2pVideoRef}
+                className="remote-video"
+                autoPlay
+                playsInline
+                onCanPlay={handleP2PCanPlay}
+              />
+            </div>
           )}
         </div>
 
@@ -265,12 +373,18 @@ function ParentRoom({
 
           {/* TOP: badge (left) + timer + beenden (right) */}
           <div className="parent-header">
-            <ConnectionBadge
-              state={monitorState}
-              videoQuality={videoQuality}
-              audioQuality={audioQuality}
-              light
-            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <ConnectionBadge
+                state={monitorState}
+                videoQuality={p2pActive ? 3 : videoQuality}
+                audioQuality={p2pActive ? 3 : audioQuality}
+                light
+              />
+              <ModeBadge
+                mode={p2pActive ? 'direct' : 'secured'}
+                transport={p2pActive ? p2pTransport : undefined}
+              />
+            </div>
             <div className="parent-header-right">
               {(monitorState === 'connected' || monitorState === 'degraded') && (
                 <SessionTimer />
@@ -287,12 +401,10 @@ function ParentRoom({
             </div>
           </div>
 
-          {/* BOTTOM LEFT: live indicators stacked above Analyse + Speak buttons */}
+          {/* BOTTOM LEFT: live indicators + action buttons */}
           <div className="parent-bottom-left">
             {moveState.isMoving && (
-              <div className="live-indicator live-indicator--move">
-                🏃 Bewegt sich
-              </div>
+              <div className="live-indicator live-indicator--move">🏃 Bewegt sich</div>
             )}
             {cryState.isCrying && (
               <div className="live-indicator live-indicator--cry">😢 Weint gerade</div>
@@ -304,19 +416,22 @@ function ParentRoom({
               >
                 Analyse
               </button>
-              <button
-                className={`speak-btn${isSpeaking ? ' speak-btn--active' : ''}`}
-                onClick={(e) => { e.stopPropagation(); toggleSpeak() }}
-                aria-label={isSpeaking ? 'Mikrofon deaktivieren' : 'Mit Baby sprechen'}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
-                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
-                  <line x1="12" y1="19" x2="12" y2="23"/>
-                  <line x1="8" y1="23" x2="16" y2="23"/>
-                </svg>
-                {isSpeaking ? 'Mikrofon aktiv' : 'Sprechen'}
-              </button>
+              {/* Speak button only available in LiveKit mode (P2P audio is one-way for now) */}
+              {!p2pActive && (
+                <button
+                  className={`speak-btn${isSpeaking ? ' speak-btn--active' : ''}`}
+                  onClick={(e) => { e.stopPropagation(); toggleSpeak() }}
+                  aria-label={isSpeaking ? 'Mikrofon deaktivieren' : 'Mit Baby sprechen'}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                    <line x1="12" y1="19" x2="12" y2="23"/>
+                    <line x1="8" y1="23" x2="16" y2="23"/>
+                  </svg>
+                  {isSpeaking ? 'Mikrofon aktiv' : 'Sprechen'}
+                </button>
+              )}
             </div>
           </div>
 
@@ -325,13 +440,15 @@ function ParentRoom({
         {summary && <SummaryBanner summary={summary} onDismiss={clearSummary} />}
         <HelpButton screen="monitor" />
 
-        {monitorState === 'degraded' && (
+        {/* Degraded banner (LiveKit only — in P2P mode video is direct) */}
+        {!p2pActive && monitorState === 'degraded' && (
           <div className="degraded-banner">
             🔊 Nur Audio — Video pausiert für stabile Verbindung
           </div>
         )}
 
-        {monitorState === 'critical' && (
+        {/* Critical overlay (suppress when P2P is active — LK disconnect is intentional) */}
+        {!p2pActive && monitorState === 'critical' && (
           <div className="critical-overlay">
             <p className="critical-title">Verbindung getrennt</p>
             <p className="critical-subtitle">
@@ -344,6 +461,23 @@ function ParentRoom({
             >
               📊 Session analysieren
             </button>
+            <button
+              className="primary-button"
+              style={{ maxWidth: 220, background: 'var(--surface-2)', marginTop: 8 }}
+              onClick={handleEnd}
+            >
+              Zurück
+            </button>
+          </div>
+        )}
+
+        {/* P2P critical overlay (only if P2P connection fails after switch) */}
+        {p2pActive && p2pMonitorState === 'critical' && (
+          <div className="critical-overlay">
+            <p className="critical-title">Direktverbindung getrennt</p>
+            <p className="critical-subtitle">
+              Die direkte Verbindung wurde unterbrochen.
+            </p>
             <button
               className="primary-button"
               style={{ maxWidth: 220, background: 'var(--surface-2)', marginTop: 8 }}
@@ -390,9 +524,9 @@ function ParentRoom({
               isMoving:      moveState.isMoving,
               moveIntensity: moveState.intensity,
             }}
-            videoQuality={videoQuality}
-            audioQuality={audioQuality}
-            showVideoOffBanner={monitorState === 'degraded'}
+            videoQuality={p2pActive ? 3 : videoQuality}
+            audioQuality={p2pActive ? 3 : audioQuality}
+            showVideoOffBanner={!p2pActive && monitorState === 'degraded'}
             onBack={() => setShowDashboard(false)}
           />
         </div>

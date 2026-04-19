@@ -4,12 +4,13 @@ import { kv } from '@vercel/kv'
 const TTL = 4 * 60 * 60 // 4 hours
 
 interface SignalState {
-  offer?:     { type: string; sdp: string }
-  answer?:    { type: string; sdp: string }
-  babyIce:    string[]   // JSON-stringified RTCIceCandidateInit[]
-  parentIce:  string[]
-  mode:       'p2p' | 'livekit'
-  createdAt:  number
+  offer?:          { type: string; sdp: string }
+  answer?:         { type: string; sdp: string }
+  babyIce:         string[]   // JSON-stringified RTCIceCandidateInit[]
+  parentIce:       string[]
+  mode:            'p2p' | 'livekit'
+  upgradeRequest?: 'p2p'      // parent → baby: "please switch to P2P"
+  createdAt:       number
 }
 
 const fresh = (): SignalState => ({
@@ -23,7 +24,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(200).end()
 
   const code = (req.method === 'GET' ? req.query.code : req.body?.code) as string
-  if (!code || !/^[a-z0-9]{8}$/.test(code)) {
+  // Accept 8-char session codes and 10-char probe codes (code + "pr" suffix)
+  if (!code || !/^[a-z0-9]{8,10}$/.test(code)) {
     return res.status(400).json({ error: 'Invalid code' })
   }
 
@@ -59,6 +61,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         break
       case 'mode':
         next = { ...state, mode: data as 'p2p' | 'livekit' }
+        break
+      case 'upgrade':
+        next = { ...state, upgradeRequest: 'p2p' }
         break
       case 'reset':
         next = fresh()

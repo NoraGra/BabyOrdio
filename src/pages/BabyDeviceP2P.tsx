@@ -1,21 +1,38 @@
 /**
  * BabyDeviceP2P — Baby-side streaming via native WebRTC (no LiveKit)
  *
- * Used when transport = 'p2p'. All UI is identical to BabyDevice,
- * but the video stream comes from getUserMedia, not LiveKit.
+ * Used when transport = 'p2p'. All UI is identical to BabyDevice.
+ *
+ * Supports two modes:
+ * 1. Standalone: acquires camera itself, creates own P2P connection
+ * 2. Handed-off: receives pre-acquired stream + existing P2P connection from
+ *    BabyDevice (used for seamless LiveKit → P2P switch — no camera flash,
+ *    no P2P re-negotiation, no stream blip on the parent side)
  */
 import { useEffect, useState, useRef } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useWakeLock } from '../hooks/useWakeLock'
 import { useWebRTC } from '../hooks/useWebRTC'
+import type { WebRTCStatus, WebRTCTransport } from '../hooks/useWebRTC'
 import ConnectionBadge from '../components/ConnectionBadge'
+import ModeBadge from '../components/ModeBadge'
 import HelpButton from '../components/HelpButton'
 import type { MonitorState } from '../hooks/useMonitorState'
+
+interface P2PHandoff {
+  status:     WebRTCStatus
+  transport:  WebRTCTransport
+  disconnect: () => void
+}
 
 interface Props {
   code: string
   onBack: () => void
   onSwitchToLiveKit: () => void
+  /** Provided on seamless LiveKit→P2P switch — use instead of getUserMedia */
+  initialStream?: MediaStream
+  /** Provided on seamless switch — skip new WebRTC negotiation, reuse existing */
+  p2pHandoff?: P2PHandoff
 }
 
 const STATUS_TO_BADGE: Record<string, MonitorState> = {
@@ -28,37 +45,48 @@ const STATUS_TO_BADGE: Record<string, MonitorState> = {
   closed:      'critical',
 }
 
-export default function BabyDeviceP2P({ code, onBack, onSwitchToLiveKit }: Props) {
-  const [localStream,      setLocalStream]      = useState<MediaStream | null>(null)
-  const [camError,         setCamError]         = useState<string | null>(null)
-  const [showQR,           setShowQR]           = useState(false)
-  const [pairingExpanded,  setPairingExpanded]  = useState(true)
-  const [showEndConfirm,   setShowEndConfirm]   = useState(false)
-  const [nightMode,        setNightMode]        = useState(false)
-  const [isSwitchingCam,   setIsSwitchingCam]  = useState(false)
+export default function BabyDeviceP2P({
+  code,
+  onBack,
+  onSwitchToLiveKit,
+  initialStream,
+  p2pHandoff,
+}: Props) {
+  const [localStream,     setLocalStream]     = useState<MediaStream | null>(initialStream ?? null)
+  const [camError,        setCamError]        = useState<string | null>(null)
+  const [showQR,          setShowQR]          = useState(false)
+  const [pairingExpanded, setPairingExpanded] = useState(true)
+  const [showEndConfirm,  setShowEndConfirm]  = useState(false)
+  const [nightMode,       setNightMode]       = useState(false)
+  const [isSwitchingCam,  setIsSwitchingCam] = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
 
   useWakeLock()
 
-  // ── Acquire camera + mic ────────────────────────────────────────────────
+  // ── Acquire camera + mic (only when no stream was handed off) ─────────
   useEffect(() => {
+    if (initialStream) return  // already have a stream — skip getUserMedia
+
     let active = true
-    let stream: MediaStream | null = null
+    let acquired: MediaStream | null = null
 
     navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
       audio: true,
     })
-      .then(s => { if (active) { stream = s; setLocalStream(s) } else s.getTracks().forEach(t => t.stop()) })
+      .then(s => {
+        if (active) { acquired = s; setLocalStream(s) }
+        else        { s.getTracks().forEach(t => t.stop()) }
+      })
       .catch(err => { if (active) setCamError(err.message) })
 
     return () => {
       active = false
-      stream?.getTracks().forEach(t => t.stop())
+      acquired?.getTracks().forEach(t => t.stop())  // only stop what WE acquired
     }
-  }, [])
+  }, [])  // eslint-disable-line react-hooks/exhaustive-deps -- initialStream is stable
 
-  // ── Attach stream to <video> preview ────────────────────────────────────
+  // ── Attach stream to <video> preview ───────────────────────────────────
   useEffect(() => {
     if (videoRef.current && localStream) videoRef.current.srcObject = localStream
   }, [localStream])
@@ -70,12 +98,19 @@ export default function BabyDeviceP2P({ code, onBack, onSwitchToLiveKit }: Props
   }, [])
 
   // ── P2P connection ──────────────────────────────────────────────────────
-  // onModeSwitch: called when parent writes mode='livekit' to KV → baby follows
-  // (no need to call disconnect() — unmounting BabyDeviceP2P cleans up via useEffect)
-  const { status, transport, disconnect } = useWebRTC({
-    code, role: 'baby', localStream,
+  // When p2pHandoff is provided: reuse existing connection (seamless switch).
+  // When not: create fresh connection (standalone P2P start).
+  const ownWebRTC = useWebRTC({
+    code,
+    role:        'baby',
+    localStream: localStream,
+    enabled:     !p2pHandoff,   // disabled when handed off
     onModeSwitch: () => onSwitchToLiveKit(),
   })
+
+  const status    = p2pHandoff ? p2pHandoff.status    : ownWebRTC.status
+  const transport = p2pHandoff ? p2pHandoff.transport : ownWebRTC.transport
+  const disconnect = p2pHandoff ? p2pHandoff.disconnect : ownWebRTC.disconnect
 
   // ── Flip camera ─────────────────────────────────────────────────────────
   const flipCamera = async () => {
@@ -114,9 +149,6 @@ export default function BabyDeviceP2P({ code, onBack, onSwitchToLiveKit }: Props
   const qrUrl = `${window.location.origin}/?code=${code}`
   const badgeState: MonitorState = STATUS_TO_BADGE[status] ?? 'connecting'
   const isConnected = status === 'connected'
-  const transportLabel = transport === 'direct' ? '🔒 P2P direkt'
-                       : transport === 'relay'  ? '🔒 P2P relay'
-                       : '🔒 P2P…'
 
   if (camError) {
     return (
@@ -134,13 +166,7 @@ export default function BabyDeviceP2P({ code, onBack, onSwitchToLiveKit }: Props
     <div className={`screen baby-screen${nightMode ? ' baby-screen--night' : ''}`}>
 
       {/* ── Local camera preview ─────────────────────────────────────── */}
-      <video
-        ref={videoRef}
-        className="baby-preview"
-        autoPlay
-        playsInline
-        muted
-      />
+      <video ref={videoRef} className="baby-preview" autoPlay playsInline muted />
 
       {/* ── Night mode overlay ───────────────────────────────────────── */}
       {nightMode && (
@@ -156,9 +182,7 @@ export default function BabyDeviceP2P({ code, onBack, onSwitchToLiveKit }: Props
           <div className="baby-top-left">
             <div className="baby-badge-row">
               <ConnectionBadge state={badgeState} />
-              <span className="transport-badge transport-badge--p2p">
-                {transportLabel}
-              </span>
+              <ModeBadge mode="direct" transport={transport} />
             </div>
             <span className="wake-notice-inline">
               Wenn der Bildschirm ausgeht oder du die App verlässt, stoppt die Übertragung.
