@@ -86,6 +86,9 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
   const pendingCandidates   = useRef<RTCIceCandidateInit[]>([])
   const babyIceIdxRef       = useRef(0)
   const parentIceIdxRef     = useRef(0)
+  // Store callback in ref so changing it never re-triggers the main effect
+  const onModeSwitchRef     = useRef(onModeSwitch)
+  useEffect(() => { onModeSwitchRef.current = onModeSwitch }, [onModeSwitch])
 
   const stopPolling = useCallback(() => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
@@ -211,8 +214,8 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
       // Baby: detect mode switch requested by parent
       // Only react AFTER remote description is set — prevents false trigger
       // from stale 'livekit' mode left in KV by a previous session
-      if (role === 'baby' && s.mode === 'livekit' && remoteDescSetRef.current && onModeSwitch) {
-        onModeSwitch('livekit')
+      if (role === 'baby' && s.mode === 'livekit' && remoteDescSetRef.current && onModeSwitchRef.current) {
+        onModeSwitchRef.current('livekit')
         return   // stop further P2P processing
       }
 
@@ -253,7 +256,7 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
       stopPolling()
       pc.close()
     }
-  }, [code, role, localStream, enabled, onModeSwitch, stopPolling])
+  }, [code, role, localStream, enabled, stopPolling])
 
   return { status, transport, remoteStream, disconnect }
 }
