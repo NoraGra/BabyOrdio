@@ -12,7 +12,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useWakeLock } from '../hooks/useWakeLock'
-import { useWebRTC, postSignal } from '../hooks/useWebRTC'
+import { useWebRTC } from '../hooks/useWebRTC'
 import type { WebRTCStatus, WebRTCTransport } from '../hooks/useWebRTC'
 import ConnectionBadge from '../components/ConnectionBadge'
 import ModeBadge from '../components/ModeBadge'
@@ -61,7 +61,6 @@ export default function BabyDeviceP2P({
   const [showEndConfirm,  setShowEndConfirm]  = useState(false)
   const [nightMode,       setNightMode]       = useState(false)
   const [isSwitchingCam,  setIsSwitchingCam] = useState(false)
-  const [videoOff,        setVideoOff]        = useState(false)
   const [shareToast,      setShareToast]      = useState<string | null>(null)
   const videoRef      = useRef<HTMLVideoElement>(null)
   // Track current facing mode for mobile-compatible camera flip
@@ -170,44 +169,6 @@ export default function BabyDeviceP2P({
   const replaceVideoTrack = p2pHandoff ? p2pHandoff.replaceVideoTrack : ownWebRTC.replaceVideoTrack
   const replaceAudioTrack = p2pHandoff ? p2pHandoff.replaceAudioTrack : ownWebRTC.replaceAudioTrack
 
-  // ── Secret video-off toggle (triple-tap the "Privat" badge) ─────────────
-  // Disables video stream without ending the session.
-  // Baby sees a dark screen; parent sees AudioOnlyView + banner.
-  const secretTapRef = useRef(0)
-
-  const handleSecretTap = () => {
-    secretTapRef.current += 1
-    if (secretTapRef.current < 3) return
-    secretTapRef.current = 0
-    toggleVideoOff()
-  }
-
-  const toggleVideoOff = async () => {
-    if (videoOff) {
-      // Re-enable: re-acquire video track
-      try {
-        const newVidStream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: facingModeRef.current, width: { ideal: 1280 }, height: { ideal: 720 } },
-          audio: false,
-        })
-        const newVidTrack = newVidStream.getVideoTracks()[0]
-        if (newVidTrack) {
-          await replaceVideoTrack(newVidTrack).catch(e => console.warn('[P2P] replaceVideoTrack:', e))
-          localStream?.getVideoTracks().forEach(t => t.stop())
-          setLocalStream(new MediaStream([newVidTrack, ...(localStream?.getAudioTracks() ?? [])]))
-        }
-        await postSignal(code, 'video-off', false)
-        setVideoOff(false)
-      } catch (e) { console.error('Video re-enable failed', e) }
-    } else {
-      // Disable: stop video, null the sender, tell parent
-      await replaceVideoTrack(null).catch(e => console.warn('[P2P] replaceVideoTrack null:', e))
-      localStream?.getVideoTracks().forEach(t => t.stop())
-      setLocalStream(new MediaStream(localStream?.getAudioTracks() ?? []))
-      await postSignal(code, 'video-off', true)
-      setVideoOff(true)
-    }
-  }
 
   // ── Flip camera ─────────────────────────────────────────────────────────
   // Uses facingMode toggle — works on mobile Chrome where enumerateDevices()
@@ -284,9 +245,7 @@ export default function BabyDeviceP2P({
     <div className={`screen baby-screen${nightMode ? ' baby-screen--night' : ''}`}>
 
       {/* ── Local camera preview ─────────────────────────────────────── */}
-      <video ref={videoRef} className="baby-preview" autoPlay playsInline muted
-        style={{ visibility: videoOff ? 'hidden' : 'visible' }} />
-      {videoOff && <div className="video-off-screen"><span>🎙️ Nur Audio</span></div>}
+      <video ref={videoRef} className="baby-preview" autoPlay playsInline muted />
 
       {/* ── Night mode overlay ───────────────────────────────────────── */}
       {nightMode && (
@@ -302,10 +261,7 @@ export default function BabyDeviceP2P({
           <div className="baby-top-left">
             <div className="baby-badge-row">
               <ConnectionBadge state={badgeState} />
-              {/* Triple-tap the mode badge to secretly toggle video off/on */}
-              <span onClick={handleSecretTap} style={{ cursor: 'default', userSelect: 'none' }}>
-                <ModeBadge mode="direct" transport={transport} />
-              </span>
+              <ModeBadge mode="direct" transport={transport} />
             </div>
             <span className="wake-notice-inline">
               Wenn der Bildschirm ausgeht oder du die App verlässt, stoppt die Übertragung.
@@ -314,7 +270,7 @@ export default function BabyDeviceP2P({
               <button
                 className="flip-camera-btn"
                 onClick={flipCamera}
-                disabled={isSwitchingCam || videoOff}
+                disabled={isSwitchingCam}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
                   stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">

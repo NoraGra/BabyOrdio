@@ -170,8 +170,7 @@ function ParentRoom({
   // P2P video element — muted so iOS allows autoplay without user gesture
   const p2pVideoRef    = useRef<HTMLVideoElement | null>(null)
   const p2pSwitchedRef = useRef(false)
-  const [p2pActive,      setP2pActive]      = useState(false)
-  const [babyVideoOff,   setBabyVideoOff]   = useState(false)
+  const [p2pActive, setP2pActive] = useState(false)
   // p2pVideoEl tracks the video DOM element reactively (for analysis hooks)
   const [p2pVideoEl, setP2pVideoEl] = useState<HTMLVideoElement | null>(null)
   const p2pVideoCallbackRef = useCallback((el: HTMLVideoElement | null) => {
@@ -223,24 +222,6 @@ function ParentRoom({
       p2pAudioElRef.current = null
     }
   }, [p2pActive, p2pRemoteStream])
-
-  // ── Poll for baby videoOff signal ────────────────────────────────────
-  // Baby posts 'video-off: true/false' to KV when toggling video.
-  // We poll independently at 2 s so the parent can show the right UI.
-  useEffect(() => {
-    let alive = true
-    const poll = async () => {
-      try {
-        const r = await fetch(`/api/signal?code=${code}`, { cache: 'no-store' })
-        if (!r.ok || !alive) return
-        const s = await r.json()
-        if (alive) setBabyVideoOff(!!s.videoOff)
-      } catch { /* ignore */ }
-    }
-    poll()
-    const id = setInterval(poll, 2000)
-    return () => { alive = false; clearInterval(id) }
-  }, [code])
 
   // When P2P stream arrives: put ONLY video tracks into the muted <video> element.
   // (Same as v45 — video is proven to work this way.)
@@ -504,25 +485,20 @@ function ParentRoom({
           </div>
 
           {/* P2P video layer — MUTED so iOS allows autoplay.
-              Audio is handled by the separate <audio> element above.
-              When baby turned video off, show AudioOnlyView instead. */}
+              Audio is handled by the separate <audio> element above. */}
           {p2pRemoteStream && (
             <div
               className="video-layer"
               style={{ opacity: p2pActive ? 1 : 0 }}
             >
-              {p2pActive && babyVideoOff ? (
-                <AudioOnlyView waiting={false} />
-              ) : (
-                <video
-                  ref={p2pVideoCallbackRef}
-                  className="remote-video"
-                  autoPlay
-                  playsInline
-                  muted
-                  onPlaying={handleP2PCanPlay}
-                />
-              )}
+              <video
+                ref={p2pVideoCallbackRef}
+                className="remote-video"
+                autoPlay
+                playsInline
+                muted
+                onPlaying={handleP2PCanPlay}
+              />
             </div>
           )}
         </div>
@@ -535,7 +511,7 @@ function ParentRoom({
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <ConnectionBadge
                 state={monitorState}
-                videoQuality={p2pActive ? (babyVideoOff ? 0 : 3) : videoQuality}
+                videoQuality={p2pActive ? 3 : videoQuality}
                 audioQuality={p2pActive ? 3 : audioQuality}
                 light
               />
@@ -700,12 +676,6 @@ function ParentRoom({
           </div>
         )}
 
-        {/* Baby turned video off intentionally */}
-        {p2pActive && babyVideoOff && (
-          <div className="degraded-banner">
-            🎙️ Baby hat Video deaktiviert — nur Audio aktiv
-          </div>
-        )}
 
         {/* Critical overlay (suppress when P2P is active — LK disconnect is intentional) */}
         {!p2pActive && monitorState === 'critical' && (
@@ -800,9 +770,9 @@ function ParentRoom({
               isMoving:      moveState.isMoving,
               moveIntensity: moveState.intensity,
             }}
-            videoQuality={p2pActive ? (babyVideoOff ? 0 : 3) : videoQuality}
+            videoQuality={p2pActive ? 3 : videoQuality}
             audioQuality={p2pActive ? 3 : audioQuality}
-            showVideoOffBanner={babyVideoOff || (!p2pActive && monitorState === 'degraded')}
+            showVideoOffBanner={!p2pActive && monitorState === 'degraded'}
             onBack={() => setShowDashboard(false)}
           />
         </div>
