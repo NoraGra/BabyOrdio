@@ -67,9 +67,10 @@ export default function BabyDevice({ code, onBack }: Props) {
   // ── Background P2P — starts immediately (same as parent side) ────────
   // BabyDeviceP2P receives this connection as a handoff (no re-negotiation).
   const {
-    status:     p2pStatus,
-    transport:  p2pTransport,
-    disconnect: p2pDisconnect,
+    status:           p2pStatus,
+    transport:        p2pTransport,
+    disconnect:       p2pDisconnect,
+    replaceVideoTrack: p2pReplaceVideoTrack,
   } = useWebRTC({
     code,
     role:        'baby',
@@ -132,9 +133,10 @@ export default function BabyDevice({ code, onBack }: Props) {
         onBack={onBack}
         initialStream={camStream}
         p2pHandoff={{
-          status:     p2pStatus,
-          transport:  p2pTransport,
-          disconnect: p2pDisconnect,
+          status:            p2pStatus,
+          transport:         p2pTransport,
+          disconnect:        p2pDisconnect,
+          replaceVideoTrack: p2pReplaceVideoTrack,
         }}
         onSwitchToLiveKit={() => {
           isIntentionalSwitchRef.current = false
@@ -220,6 +222,8 @@ function BabyRoom({ code, onBack, camStream, p2pStatus }: LiveKitProps) {
 
   // Keep a ref to the currently published video track so we can unpublish on flip
   const publishedVideoTrackRef = useRef<MediaStreamTrack | null>(null)
+  // Track current facing mode for mobile-compatible camera flip
+  const facingModeRef = useRef<'environment' | 'user'>('environment')
 
   useWakeLock()
 
@@ -273,45 +277,42 @@ function BabyRoom({ code, onBack, camStream, p2pStatus }: LiveKitProps) {
   }, [room])
 
   // ── Flip camera ──────────────────────────────────────────────────────
-  // Correct approach: getUserMedia with new device → unpublish old track →
-  // publish new track → update preview. Does NOT use room.switchActiveDevice
-  // (that only works for LiveKit-managed tracks, not manually published ones).
+  // Uses facingMode toggle (not deviceId) — works on mobile Chrome where
+  // enumerateDevices() returns empty deviceIds. Unpublishes the old LiveKit
+  // track and publishes the new one without touching the audio track.
   const flipCamera = useCallback(async () => {
     if (isSwitchingCam) return
     setIsSwitchingCam(true)
     try {
-      const devices = await navigator.mediaDevices.enumerateDevices()
-      const cams    = devices.filter(d => d.kind === 'videoinput')
-      if (cams.length < 2) return
+      const nextFacing: 'environment' | 'user' =
+        facingModeRef.current === 'environment' ? 'user' : 'environment'
 
-      const currentId = camStream.getVideoTracks()[0]?.getSettings().deviceId
-      const nextCam   = cams.find(d => d.deviceId !== currentId) ?? cams[0]
-
-      // Acquire new video stream with the selected camera
-      const newVideoStream = await navigator.mediaDevices.getUserMedia({
-        video: { deviceId: { exact: nextCam.deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } },
-        audio: false,
-      })
-      const newVideoTrack = newVideoStream.getVideoTracks()[0]
-
-      // Unpublish old video track from LiveKit
+      // Unpublish + stop old video track first (required on some mobile browsers)
       const oldVideoTrack = publishedVideoTrackRef.current
       if (oldVideoTrack) {
         await localParticipant.unpublishTrack(oldVideoTrack).catch(() => {})
         oldVideoTrack.stop()
+        publishedVideoTrackRef.current = null
       }
+
+      // Acquire new video stream with the opposite facingMode
+      const newVideoStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: nextFacing, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      })
+      const newVideoTrack = newVideoStream.getVideoTracks()[0]
 
       // Publish new video track to LiveKit
       const lkVideo = new LocalVideoTrack(newVideoTrack, undefined, true)
       publishedVideoTrackRef.current = newVideoTrack
       await localParticipant.publishTrack(lkVideo, { source: Track.Source.Camera })
 
-      // Update local preview with the new video track (keeping existing audio)
+      // Update local preview (new video + existing audio tracks)
       if (videoRef.current) {
-        const previewStream = new MediaStream([newVideoTrack, ...camStream.getAudioTracks()])
-        videoRef.current.srcObject = previewStream
+        videoRef.current.srcObject = new MediaStream([newVideoTrack, ...camStream.getAudioTracks()])
       }
 
+      facingModeRef.current = nextFacing
     } catch (e) { console.error('Camera flip failed:', e) }
     finally { setIsSwitchingCam(false) }
   }, [localParticipant, camStream, isSwitchingCam])

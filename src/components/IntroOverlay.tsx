@@ -18,7 +18,6 @@ export default function IntroOverlay({ onDone }: Props) {
           <span className="intro-logo-baby">baby</span>
           <span className="intro-logo-ordio">ordio</span>
         </p>
-        <p className="intro-tagline">Ganz nah bei deinem Baby</p>
       </div>
       <div className="intro-circle" />
     </div>

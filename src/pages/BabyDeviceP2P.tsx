@@ -20,9 +20,10 @@ import HelpButton from '../components/HelpButton'
 import type { MonitorState } from '../hooks/useMonitorState'
 
 interface P2PHandoff {
-  status:     WebRTCStatus
-  transport:  WebRTCTransport
-  disconnect: () => void
+  status:            WebRTCStatus
+  transport:         WebRTCTransport
+  disconnect:        () => void
+  replaceVideoTrack: (track: MediaStreamTrack) => Promise<void>
 }
 
 interface Props {
@@ -59,7 +60,9 @@ export default function BabyDeviceP2P({
   const [showEndConfirm,  setShowEndConfirm]  = useState(false)
   const [nightMode,       setNightMode]       = useState(false)
   const [isSwitchingCam,  setIsSwitchingCam] = useState(false)
-  const videoRef = useRef<HTMLVideoElement>(null)
+  const videoRef      = useRef<HTMLVideoElement>(null)
+  // Track current facing mode for mobile-compatible camera flip
+  const facingModeRef = useRef<'environment' | 'user'>('environment')
 
   useWakeLock()
 
@@ -108,25 +111,39 @@ export default function BabyDeviceP2P({
     onModeSwitch: () => onSwitchToLiveKit(),
   })
 
-  const status    = p2pHandoff ? p2pHandoff.status    : ownWebRTC.status
-  const transport = p2pHandoff ? p2pHandoff.transport : ownWebRTC.transport
-  const disconnect = p2pHandoff ? p2pHandoff.disconnect : ownWebRTC.disconnect
+  const status             = p2pHandoff ? p2pHandoff.status             : ownWebRTC.status
+  const transport          = p2pHandoff ? p2pHandoff.transport          : ownWebRTC.transport
+  const disconnect         = p2pHandoff ? p2pHandoff.disconnect         : ownWebRTC.disconnect
+  const replaceVideoTrack  = p2pHandoff ? p2pHandoff.replaceVideoTrack  : ownWebRTC.replaceVideoTrack
 
   // ── Flip camera ─────────────────────────────────────────────────────────
+  // Uses facingMode toggle — works on mobile Chrome where enumerateDevices()
+  // returns empty deviceIds. Replaces the video sender in the RTCPeerConnection
+  // via replaceTrack (no re-negotiation needed) and updates local preview.
   const flipCamera = async () => {
     if (isSwitchingCam || !localStream) return
     setIsSwitchingCam(true)
     try {
-      const devices = await navigator.mediaDevices.enumerateDevices()
-      const cams = devices.filter(d => d.kind === 'videoinput')
-      if (cams.length < 2) return
-      const currentId = localStream.getVideoTracks()[0]?.getSettings().deviceId
-      const next = cams.find(d => d.deviceId !== currentId) ?? cams[0]
-      const newStream = await navigator.mediaDevices.getUserMedia({
-        video: { deviceId: { exact: next.deviceId } },
-        audio: true,
+      const nextFacing: 'environment' | 'user' =
+        facingModeRef.current === 'environment' ? 'user' : 'environment'
+
+      const newVideoStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: nextFacing, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
       })
+      const newVideoTrack = newVideoStream.getVideoTracks()[0]
+
+      // Replace track in the active P2P RTCPeerConnection (no re-negotiation)
+      await replaceVideoTrack(newVideoTrack).catch(e => console.warn('replaceTrack failed', e))
+
+      // Stop old video track(s)
+      localStream.getVideoTracks().forEach(t => t.stop())
+
+      // Build new preview stream: new video + existing audio
+      const newStream = new MediaStream([newVideoTrack, ...localStream.getAudioTracks()])
       setLocalStream(newStream)
+
+      facingModeRef.current = nextFacing
     } catch (e) { console.error('Flip failed', e) }
     finally { setIsSwitchingCam(false) }
   }

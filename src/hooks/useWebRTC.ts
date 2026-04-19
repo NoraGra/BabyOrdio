@@ -34,10 +34,11 @@ export type WebRTCStatus =
 export type WebRTCTransport = 'direct' | 'relay' | 'unknown'
 
 export interface WebRTCResult {
-  status:       WebRTCStatus
-  transport:    WebRTCTransport
-  remoteStream: MediaStream | null
-  disconnect:   () => void
+  status:             WebRTCStatus
+  transport:          WebRTCTransport
+  remoteStream:       MediaStream | null
+  disconnect:         () => void
+  replaceVideoTrack:  (track: MediaStreamTrack) => Promise<void>
 }
 
 interface Options {
@@ -102,6 +103,13 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
     setStatus('closed')
     setRemoteStream(null)
   }, [stopPolling])
+
+  const replaceVideoTrack = useCallback(async (newTrack: MediaStreamTrack) => {
+    const pc = pcRef.current
+    if (!pc) return
+    const sender = pc.getSenders().find(s => s.track?.kind === 'video')
+    if (sender) await sender.replaceTrack(newTrack)
+  }, [])
 
   useEffect(() => {
     if (!enabled) return
@@ -245,5 +253,5 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
     }
   }, [code, role, localStream, enabled, stopPolling])
 
-  return { status, transport, remoteStream, disconnect }
+  return { status, transport, remoteStream, disconnect, replaceVideoTrack }
 }
