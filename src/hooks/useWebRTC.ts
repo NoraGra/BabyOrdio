@@ -122,6 +122,14 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
   const onModeSwitchRef     = useRef(onModeSwitch)
   useEffect(() => { onModeSwitchRef.current = onModeSwitch }, [onModeSwitch])
 
+  // Store audio + video sender refs explicitly.
+  // When LiveKit stops the original track it calls sender.replaceTrack(null),
+  // which sets sender.track = null. At that point the usual
+  // getSenders().find(s => s.track?.kind === 'audio') returns undefined and
+  // replaceAudioTrack silently does nothing. Storing refs avoids this problem.
+  const audioSenderRef = useRef<RTCRtpSender | null>(null)
+  const videoSenderRef = useRef<RTCRtpSender | null>(null)
+
   const stopPolling = useCallback(() => {
     if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
   }, [])
@@ -136,17 +144,27 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
   }, [stopPolling])
 
   const replaceVideoTrack = useCallback(async (newTrack: MediaStreamTrack) => {
-    const pc = pcRef.current
-    if (!pc) return
-    const sender = pc.getSenders().find(s => s.track?.kind === 'video')
-    if (sender) await sender.replaceTrack(newTrack)
+    // Use stored ref first (survives sender.track becoming null after replaceTrack(null))
+    const sender = videoSenderRef.current
+      ?? pcRef.current?.getSenders().find(s => s.track?.kind === 'video')
+    if (sender) {
+      LOG('replaceVideoTrack → sender found, replacing track', newTrack.id)
+      await sender.replaceTrack(newTrack)
+    } else {
+      LOG('replaceVideoTrack → NO sender found!')
+    }
   }, [])
 
   const replaceAudioTrack = useCallback(async (newTrack: MediaStreamTrack) => {
-    const pc = pcRef.current
-    if (!pc) return
-    const sender = pc.getSenders().find(s => s.track?.kind === 'audio')
-    if (sender) await sender.replaceTrack(newTrack)
+    // Use stored ref first (survives sender.track becoming null after replaceTrack(null))
+    const sender = audioSenderRef.current
+      ?? pcRef.current?.getSenders().find(s => s.track?.kind === 'audio')
+    if (sender) {
+      LOG('replaceAudioTrack → sender found, replacing track', newTrack.id)
+      await sender.replaceTrack(newTrack)
+    } else {
+      LOG('replaceAudioTrack → NO sender found!')
+    }
   }, [])
 
   useEffect(() => {
@@ -177,7 +195,13 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
     // offer's m-lines, causing SDP negotiation failure.
     if (localStream) {
       LOG('adding local tracks:', localStream.getTracks().map(t => t.kind))
-      localStream.getTracks().forEach(track => pc.addTrack(track, localStream))
+      localStream.getTracks().forEach(track => {
+        const sender = pc.addTrack(track, localStream)
+        // Store refs so replaceAudioTrack/replaceVideoTrack can find them
+        // even if sender.track is later set to null by LiveKit
+        if (track.kind === 'audio') audioSenderRef.current = sender
+        if (track.kind === 'video') videoSenderRef.current = sender
+      })
     }
 
     // ── Receive remote tracks ─────────────────────────────────────────
@@ -363,6 +387,8 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
       if (gatheringTimer) clearTimeout(gatheringTimer)
       stopPolling()
       pc.close()
+      audioSenderRef.current = null
+      videoSenderRef.current = null
       setRemoteStream(null)
     }
   }, [code, role, localStream, enabled, stopPolling])  // eslint-disable-line react-hooks/exhaustive-deps

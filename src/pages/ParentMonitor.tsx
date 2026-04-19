@@ -204,15 +204,20 @@ function ParentRoom({
     } catch (e) { console.warn('[P2P] audio connect:', e) }
   }, [])
 
-  // Create AudioContext once on mount; unlock via user interaction + LiveKit events
+  // Create AudioContext once on mount; unlock via user interaction + LiveKit events.
+  //
+  // IMPORTANT: do NOT use { once: true } on the listeners.
+  // The first user tap often fires before P2P audio tracks have arrived, so
+  // connectP2PAudio() is a no-op at that point. Without once:true the listener
+  // persists and fires again when the user next taps — by that time tracks are
+  // available and audio connects properly.
   useEffect(() => {
     const ctx = new AudioContext()
     p2pAudioCtxRef.current = ctx
 
-    // Unlock via any direct user interaction (capture phase = fires first)
     const unlock = () => ctx.resume().then(connectP2PAudio).catch(() => {})
-    document.addEventListener('touchstart', unlock, { once: true, capture: true })
-    document.addEventListener('mousedown',  unlock, { once: true, capture: true })
+    document.addEventListener('touchstart', unlock, { capture: true })
+    document.addEventListener('mousedown',  unlock, { capture: true })
 
     return () => {
       ctx.close().catch(() => {})
@@ -236,6 +241,15 @@ function ParentRoom({
     tryUnlock()  // check immediately (may already be unlocked)
     return () => { room.off(RoomEvent.AudioPlaybackStatusChanged, tryUnlock) }
   }, [room, connectP2PAudio])
+
+  // Extra fallback: when P2P switch just completed, force a resume attempt.
+  // By the time p2pActive becomes true, the user has watched the crossfade
+  // animation and the LK audio-unlock has likely already run — so resume()
+  // should succeed here even without a fresh user gesture.
+  useEffect(() => {
+    if (!p2pActive) return
+    p2pAudioCtxRef.current?.resume().then(connectP2PAudio).catch(() => {})
+  }, [p2pActive, connectP2PAudio])
 
   // When P2P stream arrives: store audio tracks + try immediate connect.
   // Video goes to the muted <video> element (iOS allows muted-video autoplay).
