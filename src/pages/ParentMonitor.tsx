@@ -167,7 +167,7 @@ function ParentRoom({
   })
 
   // P2P video element
-  const p2pVideoRef   = useRef<HTMLVideoElement>(null)
+  const p2pVideoRef    = useRef<HTMLVideoElement>(null)
   const p2pSwitchedRef = useRef(false)
   const [p2pActive, setP2pActive] = useState(false)
 
@@ -178,24 +178,37 @@ function ParentRoom({
     }
   }, [p2pRemoteStream])
 
-  // Seamless crossfade when P2P video has its first frame
   const room = useRoomContext()
-  const handleP2PCanPlay = useCallback(async () => {
-    if (p2pSwitchedRef.current || p2pActive) return
+
+  // Core switch logic — called by onCanPlay OR by the p2pStatus fallback below
+  const doSwitch = useCallback(async () => {
+    if (p2pSwitchedRef.current) return
     p2pSwitchedRef.current = true
-
-    // Signal baby to also switch modes
-    await postSignal(code, 'upgrade', 'p2p')
-
-    // Start visual crossfade (CSS transition handles the animation)
-    setP2pActive(true)
-
-    // After fade completes, disconnect LiveKit (intentional — no onBack())
+    await postSignal(code, 'upgrade', 'p2p')  // signal baby
+    setP2pActive(true)                         // start CSS crossfade
     setTimeout(() => {
       intentionalSwitchRef.current = true
-      room.disconnect()
+      room.disconnect()                        // drop LiveKit after fade
     }, 650)
-  }, [code, p2pActive, room, intentionalSwitchRef])
+  }, [code, room, intentionalSwitchRef])
+
+  // Primary trigger: onCanPlay (cleanest — video is provably rendering)
+  const handleP2PCanPlay = useCallback(() => doSwitch(), [doSwitch])
+
+  // Fallback trigger: p2pStatus = 'connected' + 1.5 s delay
+  // Needed because some browsers don't fire canplay when tracks are added
+  // to a MediaStream that's already set as srcObject.
+  useEffect(() => {
+    if (p2pStatus !== 'connected' || p2pSwitchedRef.current) return
+    // Re-set srcObject + force play so the video element wakes up
+    if (p2pVideoRef.current && p2pRemoteStream) {
+      p2pVideoRef.current.srcObject = p2pRemoteStream
+      p2pVideoRef.current.play().catch(() => {})
+    }
+    // Give onCanPlay 1.5 s to fire; if it hasn't, switch anyway
+    const id = setTimeout(() => doSwitch(), 1500)
+    return () => clearTimeout(id)
+  }, [p2pStatus, p2pRemoteStream, doSwitch])
 
   // ── LiveKit connection quality ────────────────────────────────────────
   const [lkQuality, setLkQuality] = useState<ConnectionQuality>(ConnectionQuality.Excellent)
