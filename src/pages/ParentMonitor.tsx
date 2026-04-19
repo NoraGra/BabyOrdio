@@ -179,18 +179,38 @@ function ParentRoom({
   }, [])
 
   // P2P audio via Web Audio API — bypasses iOS <audio> autoplay restrictions.
-  // AudioContext is unlocked via LiveKit's audio-playback mechanism (which hooks
-  // into the user's first touchstart) AND via our own capture-phase listener.
+  //
+  // Core problem: AudioContext.resume() only works from within a user-gesture
+  // handler. The P2P stream arrives asynchronously (no gesture), so we can't
+  // resume immediately. Instead we store the audio tracks in a ref and have
+  // ONE stable function (connectP2PAudio) that's called from BOTH:
+  //   a) when the P2P stream arrives (connects immediately if ctx already running)
+  //   b) when the ctx is unlocked (re-connects with the stored tracks)
   const p2pAudioCtxRef    = useRef<AudioContext | null>(null)
   const p2pAudioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null)
+  const p2pAudioTracksRef = useRef<MediaStreamTrack[]>([])  // stable storage
 
-  // Create AudioContext once on mount
+  // Stable connect function — reads from refs, safe to call any time
+  const connectP2PAudio = useCallback(() => {
+    const ctx    = p2pAudioCtxRef.current
+    const tracks = p2pAudioTracksRef.current
+    if (!ctx || ctx.state !== 'running' || tracks.length === 0) return
+    p2pAudioSourceRef.current?.disconnect()
+    p2pAudioSourceRef.current = null
+    try {
+      const source = ctx.createMediaStreamSource(new MediaStream(tracks))
+      source.connect(ctx.destination)
+      p2pAudioSourceRef.current = source
+    } catch (e) { console.warn('[P2P] audio connect:', e) }
+  }, [])
+
+  // Create AudioContext once on mount; unlock via user interaction + LiveKit events
   useEffect(() => {
     const ctx = new AudioContext()
     p2pAudioCtxRef.current = ctx
 
-    // Unlock via any pointer/touch interaction on the page
-    const unlock = () => { ctx.resume().catch(() => {}) }
+    // Unlock via any direct user interaction (capture phase = fires first)
+    const unlock = () => ctx.resume().then(connectP2PAudio).catch(() => {})
     document.addEventListener('touchstart', unlock, { once: true, capture: true })
     document.addEventListener('mousedown',  unlock, { once: true, capture: true })
 
@@ -200,66 +220,47 @@ function ParentRoom({
       document.removeEventListener('touchstart', unlock, { capture: true })
       document.removeEventListener('mousedown',  unlock, { capture: true })
     }
-  }, [])
+  }, [connectP2PAudio])
 
-  // Unlock AudioContext when LiveKit signals audio is playable.
-  // This piggybacks on LiveKit's own touchstart→AudioContext.resume() mechanism,
-  // ensuring the P2P AudioContext is also running once the user has unlocked audio.
+  // Piggyback on LiveKit's audio-unlock mechanism.
+  // LiveKit's startAudio() calls AudioContext.resume() from within a touchstart
+  // handler and fires AudioPlaybackStatusChanged once audio is allowed.
+  // At that moment the browser permits AudioContext ops — we use it to connect.
   useEffect(() => {
     if (!room) return
-    const tryResume = () => {
-      if (room.canPlaybackAudio) {
-        p2pAudioCtxRef.current?.resume().catch(() => {})
-      }
+    const tryUnlock = () => {
+      if (!room.canPlaybackAudio) return
+      p2pAudioCtxRef.current?.resume().then(connectP2PAudio).catch(() => {})
     }
-    room.on(RoomEvent.AudioPlaybackStatusChanged, tryResume)
-    tryResume()  // check current state immediately
-    return () => { room.off(RoomEvent.AudioPlaybackStatusChanged, tryResume) }
-  }, [room])
+    room.on(RoomEvent.AudioPlaybackStatusChanged, tryUnlock)
+    tryUnlock()  // check immediately (may already be unlocked)
+    return () => { room.off(RoomEvent.AudioPlaybackStatusChanged, tryUnlock) }
+  }, [room, connectP2PAudio])
 
-  // Connect P2P audio to AudioContext whenever the remote stream updates.
-  // Video goes to the muted <video> element (iOS autoplay works for muted video).
+  // When P2P stream arrives: store audio tracks + try immediate connect.
+  // Video goes to the muted <video> element (iOS allows muted-video autoplay).
   useEffect(() => {
     if (!p2pRemoteStream) return
     const videoTracks = p2pRemoteStream.getVideoTracks()
     const audioTracks = p2pRemoteStream.getAudioTracks()
 
-    // Video setup — same as before
+    // Video
     if (p2pVideoRef.current && videoTracks.length > 0) {
       p2pVideoRef.current.srcObject = new MediaStream(videoTracks)
       p2pVideoRef.current.play().catch(() => {})
     }
 
-    // Audio via AudioContext (replaces <audio> element)
+    // Audio — store tracks and try connecting (works if ctx already running)
     if (audioTracks.length > 0) {
-      const ctx = p2pAudioCtxRef.current
-      if (!ctx) return
-
-      // Disconnect previous source if any
-      p2pAudioSourceRef.current?.disconnect()
-      p2pAudioSourceRef.current = null
-
-      const connectAudio = () => {
-        try {
-          const source = ctx.createMediaStreamSource(new MediaStream(audioTracks))
-          source.connect(ctx.destination)
-          p2pAudioSourceRef.current = source
-        } catch (e) { console.warn('[P2P] audio connect failed:', e) }
-      }
-
-      if (ctx.state === 'running') {
-        connectAudio()
-      } else {
-        // Resume first, then connect (covers cases where unlock hasn't fired yet)
-        ctx.resume().then(connectAudio).catch(() => {})
-      }
+      p2pAudioTracksRef.current = audioTracks
+      connectP2PAudio()  // immediate attempt; no-op if ctx still suspended
     }
 
     return () => {
       p2pAudioSourceRef.current?.disconnect()
       p2pAudioSourceRef.current = null
     }
-  }, [p2pRemoteStream])
+  }, [p2pRemoteStream, connectP2PAudio])
 
   // Core switch logic — called by onPlaying OR by the p2pStatus fallback below
   const doSwitch = useCallback(async () => {
