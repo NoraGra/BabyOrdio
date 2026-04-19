@@ -167,9 +167,8 @@ function ParentRoom({
     enabled:     true,  // always try P2P; switch only fires if it actually connects
   })
 
-  // P2P video + audio elements (separate — iOS requires muted video to autoplay)
+  // P2P video element — muted so iOS allows autoplay without user gesture
   const p2pVideoRef    = useRef<HTMLVideoElement | null>(null)
-  const p2pAudioRef    = useRef<HTMLAudioElement>(null)
   const p2pSwitchedRef = useRef(false)
   const [p2pActive, setP2pActive] = useState(false)
   // p2pVideoEl tracks the video DOM element reactively (for analysis hooks)
@@ -179,21 +178,86 @@ function ParentRoom({
     setP2pVideoEl(el)
   }, [])
 
-  // Attach P2P tracks to their respective elements whenever the remote stream updates.
-  // Video element is MUTED so iOS allows autoplay regardless of audio presence.
-  // Audio is routed to a separate <audio> element (same pattern as LiveKit).
+  // P2P audio via Web Audio API — bypasses iOS <audio> autoplay restrictions.
+  // AudioContext is unlocked via LiveKit's audio-playback mechanism (which hooks
+  // into the user's first touchstart) AND via our own capture-phase listener.
+  const p2pAudioCtxRef    = useRef<AudioContext | null>(null)
+  const p2pAudioSourceRef = useRef<MediaStreamAudioSourceNode | null>(null)
+
+  // Create AudioContext once on mount
+  useEffect(() => {
+    const ctx = new AudioContext()
+    p2pAudioCtxRef.current = ctx
+
+    // Unlock via any pointer/touch interaction on the page
+    const unlock = () => { ctx.resume().catch(() => {}) }
+    document.addEventListener('touchstart', unlock, { once: true, capture: true })
+    document.addEventListener('mousedown',  unlock, { once: true, capture: true })
+
+    return () => {
+      ctx.close().catch(() => {})
+      p2pAudioCtxRef.current = null
+      document.removeEventListener('touchstart', unlock, { capture: true })
+      document.removeEventListener('mousedown',  unlock, { capture: true })
+    }
+  }, [])
+
+  // Unlock AudioContext when LiveKit signals audio is playable.
+  // This piggybacks on LiveKit's own touchstart→AudioContext.resume() mechanism,
+  // ensuring the P2P AudioContext is also running once the user has unlocked audio.
+  useEffect(() => {
+    if (!room) return
+    const tryResume = () => {
+      if (room.canPlaybackAudio) {
+        p2pAudioCtxRef.current?.resume().catch(() => {})
+      }
+    }
+    room.on(RoomEvent.AudioPlaybackStatusChanged, tryResume)
+    tryResume()  // check current state immediately
+    return () => { room.off(RoomEvent.AudioPlaybackStatusChanged, tryResume) }
+  }, [room])
+
+  // Connect P2P audio to AudioContext whenever the remote stream updates.
+  // Video goes to the muted <video> element (iOS autoplay works for muted video).
   useEffect(() => {
     if (!p2pRemoteStream) return
     const videoTracks = p2pRemoteStream.getVideoTracks()
     const audioTracks = p2pRemoteStream.getAudioTracks()
 
+    // Video setup — same as before
     if (p2pVideoRef.current && videoTracks.length > 0) {
       p2pVideoRef.current.srcObject = new MediaStream(videoTracks)
       p2pVideoRef.current.play().catch(() => {})
     }
-    if (p2pAudioRef.current && audioTracks.length > 0) {
-      p2pAudioRef.current.srcObject = new MediaStream(audioTracks)
-      p2pAudioRef.current.play().catch(() => {})
+
+    // Audio via AudioContext (replaces <audio> element)
+    if (audioTracks.length > 0) {
+      const ctx = p2pAudioCtxRef.current
+      if (!ctx) return
+
+      // Disconnect previous source if any
+      p2pAudioSourceRef.current?.disconnect()
+      p2pAudioSourceRef.current = null
+
+      const connectAudio = () => {
+        try {
+          const source = ctx.createMediaStreamSource(new MediaStream(audioTracks))
+          source.connect(ctx.destination)
+          p2pAudioSourceRef.current = source
+        } catch (e) { console.warn('[P2P] audio connect failed:', e) }
+      }
+
+      if (ctx.state === 'running') {
+        connectAudio()
+      } else {
+        // Resume first, then connect (covers cases where unlock hasn't fired yet)
+        ctx.resume().then(connectAudio).catch(() => {})
+      }
+    }
+
+    return () => {
+      p2pAudioSourceRef.current?.disconnect()
+      p2pAudioSourceRef.current = null
     }
   }, [p2pRemoteStream])
 
@@ -204,19 +268,19 @@ function ParentRoom({
     await postSignal(code, 'upgrade', 'p2p')  // signal baby
     setP2pActive(true)                         // start CSS crossfade
 
-    // iOS workaround: after the crossfade, null + re-set srcObject on the
-    // video element. This forces iOS WebKit to request a new keyframe and
-    // start rendering. Without this the video stays black until external
-    // stimulus (e.g. camera flip) triggers a new keyframe from the sender.
+    // iOS workaround: re-assign srcObject with a fresh MediaStream reference
+    // to force iOS WebKit to request a new keyframe. Using a new MediaStream
+    // (rather than null→src) avoids the brief visual black flash that null causes.
     setTimeout(() => {
       const el = p2pVideoRef.current
-      if (el && el.srcObject) {
-        const src = el.srcObject
-        el.srcObject = null
-        el.srcObject = src
-        el.play().catch(() => {})
+      if (el && el.srcObject instanceof MediaStream) {
+        const tracks = el.srcObject.getVideoTracks()
+        if (tracks.length > 0) {
+          el.srcObject = new MediaStream(tracks)
+          el.play().catch(() => {})
+        }
       }
-    }, 700)
+    }, 400)
 
     setTimeout(() => {
       intentionalSwitchRef.current = true
@@ -403,9 +467,7 @@ function ParentRoom({
           <AudioTrack trackRef={audioRef} />
         )}
 
-        {/* P2P audio — separate element (muted video + audio element = iOS autoplay) */}
-        {/* Always rendered once P2P is active so audio doesn't cut out */}
-        <audio ref={p2pAudioRef} autoPlay style={{ display: 'none' }} />
+        {/* P2P audio is handled via AudioContext (see p2pAudioCtxRef) — no <audio> element needed */}
 
         {/* ── Dual video layers — crossfade between LiveKit and P2P ──── */}
         <div className="video-container">
