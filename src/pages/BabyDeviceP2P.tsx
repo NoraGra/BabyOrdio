@@ -67,6 +67,44 @@ export default function BabyDeviceP2P({
 
   useWakeLock()
 
+  // ── Refresh video track on P2P handoff ───────────────────────────────
+  // When LiveKit disconnects (mode switch to P2P), it stops the underlying
+  // MediaStreamTrack even with userProvidedTrack=true. The handed-off
+  // camStream video track is therefore `ended` and produces no frames.
+  // Solution: immediately re-acquire a fresh video track, replace it in the
+  // P2P connection, and update the local preview — exactly what manual
+  // camera-flip did, but automatic.
+  useEffect(() => {
+    if (!p2pHandoff) return  // standalone mode — no refresh needed
+    let alive = true
+
+    navigator.mediaDevices.getUserMedia({
+      video: { facingMode: facingModeRef.current, width: { ideal: 1280 }, height: { ideal: 720 } },
+      audio: false,
+    })
+      .then(async newStream => {
+        if (!alive) { newStream.getTracks().forEach(t => t.stop()); return }
+        const newVideoTrack = newStream.getVideoTracks()[0]
+
+        // Replace in the active P2P connection (triggers fresh keyframes → parent wakes up)
+        await p2pHandoff.replaceVideoTrack(newVideoTrack).catch(e => console.warn('[P2P] replaceTrack on refresh:', e))
+
+        // Stop the old (potentially ended) video track
+        initialStream?.getVideoTracks().forEach(t => t.stop())
+
+        if (alive) {
+          // Rebuild stream: new video + original audio (audio is still live)
+          const audioTracks = initialStream?.getAudioTracks() ?? []
+          setLocalStream(new MediaStream([newVideoTrack, ...audioTracks]))
+        } else {
+          newVideoTrack.stop()
+        }
+      })
+      .catch(err => console.error('[P2P] camera refresh failed:', err))
+
+    return () => { alive = false }
+  }, [])  // eslint-disable-line react-hooks/exhaustive-deps — intentional one-shot on mount
+
   // ── Acquire camera + mic (only when no stream was handed off) ─────────
   useEffect(() => {
     if (initialStream) return  // already have a stream — skip getUserMedia
