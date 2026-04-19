@@ -105,17 +105,13 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
 
   useEffect(() => {
     if (!enabled) return
-    // Baby must have a local stream before connecting
     if (role === 'baby' && !localStream) return
 
-    aliveRef.current       = true
-    remoteDescSetRef.current = false
+    aliveRef.current          = true
+    remoteDescSetRef.current  = false
     pendingCandidates.current = []
-    babyIceIdxRef.current  = 0
-    parentIceIdxRef.current = 0
-
-    // Only baby resets — parent must NOT clear the offer baby already wrote
-    if (role === 'baby') postSignal(code, 'reset', null)
+    babyIceIdxRef.current     = 0
+    parentIceIdxRef.current   = 0
 
     const stream = new MediaStream()
     setRemoteStream(stream)
@@ -141,41 +137,30 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
     pc.oniceconnectionstatechange = () => {
       if (!aliveRef.current) return
       switch (pc.iceConnectionState) {
-        case 'checking':
-          setStatus('connecting')
-          break
+        case 'checking':    setStatus('connecting');   break
         case 'connected':
         case 'completed':
           setStatus('connected')
-          // Detect relay vs direct
           pc.getStats().then(stats => {
             stats.forEach(report => {
               if (report.type === 'candidate-pair' && (report as any).state === 'succeeded') {
-                const t = (report as any).localCandidateType as string
-                setTransport(t === 'relay' ? 'relay' : 'direct')
+                setTransport((report as any).localCandidateType === 'relay' ? 'relay' : 'direct')
               }
             })
           })
           break
-        case 'disconnected':
-          setStatus('reconnecting')
-          break
-        case 'failed':
-          setStatus('failed')
-          break
-        case 'closed':
-          if (aliveRef.current) setStatus('closed')
-          break
+        case 'disconnected': setStatus('reconnecting'); break
+        case 'failed':       setStatus('failed');       break
+        case 'closed':       if (aliveRef.current) setStatus('closed'); break
       }
     }
 
-    // ── Send our ICE candidates to signal ────────────────────────────
+    // ── Send our ICE candidates via signal ───────────────────────────
     pc.onicecandidate = (ev) => {
-      if (!ev.candidate) return
-      postSignal(code, `${role}-ice`, ev.candidate.toJSON())
+      if (ev.candidate) postSignal(code, `${role}-ice`, ev.candidate.toJSON())
     }
 
-    // ── Apply buffered ICE candidates once remote desc is set ────────
+    // ── Buffer ICE candidates until remote desc is ready ─────────────
     const applyPending = async () => {
       for (const c of pendingCandidates.current) {
         try { await pc.addIceCandidate(new RTCIceCandidate(c)) } catch { /* ignore */ }
@@ -183,23 +168,21 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
       pendingCandidates.current = []
     }
 
-    // ── Baby creates offer immediately ───────────────────────────────
-    if (role === 'baby') {
-      pc.createOffer()
-        .then(async offer => {
-          await pc.setLocalDescription(offer)
-          await postSignal(code, 'offer', { type: offer.type, sdp: offer.sdp })
-        })
-        .catch(e => console.error('[P2P] offer error', e))
-    }
-
-    // ── Polling loop ─────────────────────────────────────────────────
+    // ── Poll KV for signaling messages ───────────────────────────────
     const poll = async () => {
       if (!aliveRef.current) return
       const s = await getSignal(code)
       if (!s || !aliveRef.current) return
 
-      // Parent: receive offer, create answer
+      // Baby: detect mode switch requested by parent.
+      // Safe because baby awaits reset before polling starts,
+      // so 'livekit' can only come from the current parent session.
+      if (role === 'baby' && s.mode === 'livekit' && onModeSwitchRef.current) {
+        onModeSwitchRef.current('livekit')
+        return
+      }
+
+      // Parent: receive offer → create answer
       if (role === 'parent' && s.offer && !remoteDescSetRef.current) {
         try {
           await pc.setRemoteDescription(new RTCSessionDescription(s.offer))
@@ -209,14 +192,6 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
           await pc.setLocalDescription(answer)
           await postSignal(code, 'answer', { type: answer.type, sdp: answer.sdp })
         } catch (e) { console.error('[P2P] answer error', e) }
-      }
-
-      // Baby: detect mode switch requested by parent
-      // Only react AFTER remote description is set — prevents false trigger
-      // from stale 'livekit' mode left in KV by a previous session
-      if (role === 'baby' && s.mode === 'livekit' && remoteDescSetRef.current && onModeSwitchRef.current) {
-        onModeSwitchRef.current('livekit')
-        return   // stop further P2P processing
       }
 
       // Baby: receive answer
@@ -229,12 +204,9 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
       }
 
       // Apply new ICE candidates from the other side
-      const theirIce: string[] = role === 'baby'
-        ? (s.parentIce ?? [])
-        : (s.babyIce ?? [])
+      const theirIce: string[] = role === 'baby' ? (s.parentIce ?? []) : (s.babyIce ?? [])
       const myIdx = role === 'baby' ? parentIceIdxRef.current : babyIceIdxRef.current
       const newCandidates = theirIce.slice(myIdx)
-
       for (const raw of newCandidates) {
         const c: RTCIceCandidateInit = JSON.parse(raw)
         if (remoteDescSetRef.current) {
@@ -243,13 +215,28 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
           pendingCandidates.current.push(c)
         }
       }
-
       if (role === 'baby') parentIceIdxRef.current = theirIce.length
       else                 babyIceIdxRef.current   = theirIce.length
     }
 
-    pollRef.current = setInterval(poll, POLL_MS)
-    poll() // first poll immediately
+    // ── Start: reset KV (baby), then create offer + begin polling ────
+    // Awaiting reset ensures stale mode='livekit' from last session is
+    // cleared before first poll fires — prevents false mode-switch trigger.
+    ;(async () => {
+      if (role === 'baby') {
+        await postSignal(code, 'reset', null)
+        if (!aliveRef.current) return  // unmounted during reset
+        pc.createOffer()
+          .then(async offer => {
+            await pc.setLocalDescription(offer)
+            await postSignal(code, 'offer', { type: offer.type, sdp: offer.sdp })
+          })
+          .catch(e => console.error('[P2P] offer error', e))
+      }
+      if (!aliveRef.current) return
+      pollRef.current = setInterval(poll, POLL_MS)
+      poll()
+    })()
 
     return () => {
       aliveRef.current = false
