@@ -60,6 +60,7 @@ export default function BabyDeviceP2P({
   const [showEndConfirm,  setShowEndConfirm]  = useState(false)
   const [nightMode,       setNightMode]       = useState(false)
   const [isSwitchingCam,  setIsSwitchingCam] = useState(false)
+  const [shareToast,      setShareToast]      = useState<string | null>(null)
   const videoRef      = useRef<HTMLVideoElement>(null)
   // Track current facing mode for mobile-compatible camera flip
   const facingModeRef = useRef<'environment' | 'user'>('environment')
@@ -151,14 +152,22 @@ export default function BabyDeviceP2P({
   // ── Handlers ────────────────────────────────────────────────────────────
   const handleEndConfirm = () => { disconnect(); onBack() }
 
-  const handleShare = () => {
+  const handleShare = async () => {
     const qrUrl = `${window.location.origin}/?code=${code}`
     const formattedCode = `${code.slice(0, 4)} ${code.slice(4)}`
     if (navigator.share) {
-      navigator.share({ title: 'Baby Ordio', text: `Code: ${formattedCode}`, url: qrUrl }).catch(() => {})
-    } else {
-      navigator.clipboard?.writeText(`${formattedCode} — ${qrUrl}`)
+      try {
+        await navigator.share({ title: 'Baby Ordio', text: `Code: ${formattedCode}`, url: qrUrl })
+        return
+      } catch (e) {
+        if ((e as DOMException).name === 'AbortError') return // user cancelled
+      }
     }
+    try {
+      await navigator.clipboard.writeText(`${formattedCode} — ${qrUrl}`)
+      setShareToast('Link kopiert ✓')
+      setTimeout(() => setShareToast(null), 2200)
+    } catch { /* ignore */ }
   }
 
   // ── Derived values ───────────────────────────────────────────────────────
@@ -244,6 +253,7 @@ export default function BabyDeviceP2P({
           <p className="baby-viewer-label">
             {isConnected ? '✓ Elternteil verbunden' : 'Warte auf Verbindung…'}
           </p>
+          {shareToast && <p className="baby-join-toast">{shareToast}</p>}
 
           {showQR ? (
             <div className="qr-container" onClick={() => setShowQR(false)}>
@@ -268,7 +278,7 @@ export default function BabyDeviceP2P({
                     <polyline points="16 6 12 2 8 6"/>
                     <line x1="12" y1="2" x2="12" y2="15"/>
                   </svg>
-                  Code teilen
+                  Teilen
                 </button>
                 <button className="show-qr-btn" onClick={() => setShowQR(true)}>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
@@ -278,16 +288,16 @@ export default function BabyDeviceP2P({
                     <rect x="3" y="14" width="7" height="7" rx="1"/>
                     <path d="M14 14h3v3h-3zM17 17h3v3h-3zM14 17v3M17 14h3"/>
                   </svg>
-                  Code anzeigen
+                  QR Code anzeigen
                 </button>
               </div>
             </>
           ) : (
             <button
               className="connect-collapsed-btn"
-              onClick={() => { setPairingExpanded(true); setShowQR(true) }}
+              onClick={() => { setPairingExpanded(true); setShowQR(false) }}
             >
-              Code anzeigen
+              Anzeigen
             </button>
           )}
         </div>

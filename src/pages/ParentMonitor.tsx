@@ -246,7 +246,7 @@ function ParentRoom({
     if (p2pStatus === 'failed' || p2pStatus === 'closed') return 'critical' as const
     return 'connecting' as const
   })()
-  const monitorState = p2pActive ? p2pMonitorState : lkMonitorState
+  const monitorState = demoDegrade ? 'degraded' : (p2pActive ? p2pMonitorState : lkMonitorState)
 
   // ── Session recorder ──────────────────────────────────────────────────
   const recorder = useSessionRecorder(code)
@@ -318,6 +318,9 @@ function ParentRoom({
       console.error('Mic toggle failed:', e)
     }
   }, [isSpeaking, localParticipant])
+
+  // ── Demo mode: simulate degraded (audio-only) state for presentations ─
+  const [demoDegrade, setDemoDegrade] = useState(false)
 
   // ── End session confirm ───────────────────────────────────────────────
   const [showEndConfirm, setShowEndConfirm] = useState(false)
@@ -451,6 +454,15 @@ function ParentRoom({
                   {isSpeaking ? 'Mikrofon aktiv' : 'Sprechen'}
                 </button>
               )}
+              {/* Demo mode: simulate audio-only / degraded connection */}
+              <button
+                className="speak-btn"
+                style={{ opacity: 0.55, fontSize: '0.7rem' }}
+                onClick={(e) => { e.stopPropagation(); setDemoDegrade(d => !d) }}
+                title="Demo: Schwaches Signal simulieren"
+              >
+                {demoDegrade ? '▶ Video' : '🎬 Demo'}
+              </button>
             </div>
           </div>
 

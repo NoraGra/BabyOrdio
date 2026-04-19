@@ -53,14 +53,19 @@ interface Options {
 const POLL_MS = 600
 
 export async function postSignal(code: string, type: string, data: unknown) {
-  try {
-    await fetch('/api/signal', {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify({ code, type, data }),
-    })
-  } catch (e) {
-    console.warn('[P2P] signal POST failed', e)
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const r = await fetch('/api/signal', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ code, type, data }),
+      })
+      if (r.ok) return
+      console.warn(`[P2P] signal POST ${type} HTTP ${r.status}`)
+    } catch (e) {
+      console.warn(`[P2P] signal POST ${type} attempt ${attempt + 1} failed`, e)
+    }
+    if (attempt < 2) await new Promise(r => setTimeout(r, 300 * (attempt + 1)))
   }
 }
 
@@ -129,16 +134,28 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
     pcRef.current = pc
 
-    // ── Add local tracks ──────────────────────────────────────────────
+    // ── Add local tracks (baby) / recv-only transceivers (parent) ────
     if (localStream) {
       localStream.getTracks().forEach(track => pc.addTrack(track, localStream))
+    } else if (role === 'parent') {
+      // Explicit recvonly transceivers help Chrome negotiate correctly
+      // when the answerer (parent) has no local tracks to send.
+      pc.addTransceiver('video', { direction: 'recvonly' })
+      pc.addTransceiver('audio', { direction: 'recvonly' })
     }
 
     // ── Receive remote tracks ─────────────────────────────────────────
+    // NOTE: ev.streams[0] can be undefined in Unified Plan (modern Chrome/Firefox).
+    // Always add ev.track directly as the reliable fallback path.
     pc.ontrack = (ev) => {
-      ev.streams[0]?.getTracks().forEach(t => {
+      const addIfMissing = (t: MediaStreamTrack) => {
         if (!stream.getTracks().includes(t)) stream.addTrack(t)
-      })
+      }
+      if (ev.streams.length > 0) {
+        ev.streams[0].getTracks().forEach(addIfMissing)
+      } else {
+        addIfMissing(ev.track)
+      }
     }
 
     // ── ICE state machine ─────────────────────────────────────────────

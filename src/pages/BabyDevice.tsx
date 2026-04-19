@@ -217,6 +217,7 @@ function BabyRoom({ code, onBack, camStream, p2pStatus }: LiveKitProps) {
   const [showEndConfirm,   setShowEndConfirm]   = useState(false)
   const [nightMode,        setNightMode]        = useState(false)
   const [joinToast,        setJoinToast]        = useState<string | null>(null)
+  const [shareToast,       setShareToast]       = useState<string | null>(null)
   const [isSwitchingCam,   setIsSwitchingCam]  = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
 
@@ -403,6 +404,7 @@ function BabyRoom({ code, onBack, camStream, p2pStatus }: LiveKitProps) {
         {/* ── Bottom: code + QR ─────────────────────────────────────── */}
         <div className="baby-bottom">
           {joinToast && <p className="baby-join-toast">{joinToast}</p>}
+          {shareToast && <p className="baby-join-toast">{shareToast}</p>}
 
           {showQR ? (
             <div className="qr-container" onClick={() => setShowQR(false)}>
@@ -414,19 +416,28 @@ function BabyRoom({ code, onBack, camStream, p2pStatus }: LiveKitProps) {
               <p className="code-label">Code zum Verbinden</p>
               <p className="code-value">{formattedCode}</p>
               <div className="pairing-actions">
-                <button className="show-qr-btn" onClick={() => {
+                <button className="show-qr-btn" onClick={async () => {
+                  // Try system share sheet first; fall back to clipboard
                   if (navigator.share) {
-                    navigator.share({ title: 'Baby Ordio', text: `Code: ${formattedCode}`, url: qrUrl }).catch(() => {})
-                  } else {
-                    navigator.clipboard?.writeText(`${formattedCode} — ${qrUrl}`)
+                    try {
+                      await navigator.share({ title: 'Baby Ordio', text: `Code: ${formattedCode}`, url: qrUrl })
+                      return
+                    } catch (e) {
+                      if ((e as DOMException).name === 'AbortError') return // user cancelled
+                    }
                   }
+                  try {
+                    await navigator.clipboard.writeText(`${formattedCode} — ${qrUrl}`)
+                    setShareToast('Link kopiert ✓')
+                    setTimeout(() => setShareToast(null), 2200)
+                  } catch { /* ignore */ }
                 }}>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
                     <polyline points="16 6 12 2 8 6"/>
                     <line x1="12" y1="2" x2="12" y2="15"/>
                   </svg>
-                  Code teilen
+                  Teilen
                 </button>
                 <button className="show-qr-btn" onClick={() => setShowQR(true)}>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -435,14 +446,21 @@ function BabyRoom({ code, onBack, camStream, p2pStatus }: LiveKitProps) {
                     <rect x="3" y="14" width="7" height="7" rx="1"/>
                     <path d="M14 14h3v3h-3zM17 17h3v3h-3zM14 17v3M17 14h3"/>
                   </svg>
-                  Code anzeigen
+                  QR Code anzeigen
                 </button>
               </div>
             </>
           ) : (
-            <button className="connect-collapsed-btn" onClick={() => { setPairingExpanded(true); setShowQR(true) }}>
-              Code anzeigen
+            <button className="connect-collapsed-btn" onClick={() => { setPairingExpanded(true); setShowQR(false) }}>
+              Anzeigen
             </button>
+          )}
+
+          {/* P2P status chip — helps diagnose connection issues */}
+          {p2pStatus !== 'idle' && p2pStatus !== 'connected' && (
+            <p className="p2p-status-chip">
+              Direkt: {p2pStatus === 'signaling' ? 'Aushandlung…' : p2pStatus === 'connecting' ? 'ICE…' : p2pStatus === 'failed' ? 'fehlgeschlagen' : p2pStatus}
+            </p>
           )}
         </div>
       </div>
