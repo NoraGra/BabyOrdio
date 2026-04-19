@@ -236,6 +236,9 @@ function ParentRoom({
   const videoQuality = toLevel(lkQuality, !!videoRef)
   const audioQuality = toAudioLevel(lkQuality, !!audioRef)
 
+  // ── Demo mode: simulate degraded (audio-only) state for presentations ─
+  const [demoDegrade, setDemoDegrade] = useState(false)
+
   // ── Monitor state ─────────────────────────────────────────────────────
   const lkMonitorState = deriveMonitorState(connectionState, hasBaby, !!videoRef, !!audioRef)
 
@@ -318,9 +321,6 @@ function ParentRoom({
       console.error('Mic toggle failed:', e)
     }
   }, [isSpeaking, localParticipant])
-
-  // ── Demo mode: simulate degraded (audio-only) state for presentations ─
-  const [demoDegrade, setDemoDegrade] = useState(false)
 
   // ── End session confirm ───────────────────────────────────────────────
   const [showEndConfirm, setShowEndConfirm] = useState(false)
