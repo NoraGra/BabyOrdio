@@ -2,14 +2,14 @@
  * ParentMonitor — parent-side live view
  *
  * Architecture:
- * 1. Always starts in LiveKit mode (fast, reliable)
- * 2. Background P2P probe runs silently (data-channel ICE test)
- * 3. When probe succeeds, full P2P media connection starts in background
- * 4. When P2P video first frame is ready (onCanPlay):
- *    - CSS crossfade: LiveKit video fades out, P2P video fades in (600ms)
- *    - After fade: LiveKit disconnects (intentionally — no onBack())
+ * 1. Always starts in LiveKit mode (fast, reliable, <2 s)
+ * 2. P2P starts immediately in background (no probe gate — probe was causing
+ *    false-unavailable on same-WiFi / same-machine scenarios)
+ * 3. When P2P video first frame is ready (onCanPlay) OR p2pStatus=connected+1.5s:
+ *    - CSS crossfade: LiveKit video fades out, P2P video fades in (650ms)
+ *    - After fade: LiveKit disconnects intentionally (no onBack())
  *    - Baby is signalled via KV to also switch
- * 5. Zero gap in video — both streams overlap during fade
+ * 4. Zero gap in video — both streams overlap during fade
  */
 import { useState, useCallback, useEffect, useRef } from 'react'
 import {
@@ -41,7 +41,6 @@ import SummaryBanner      from '../components/SummaryBanner'
 import HelpButton         from '../components/HelpButton'
 import ModeBadge          from '../components/ModeBadge'
 import AnalysisDashboard  from './AnalysisDashboard'
-import { useP2PProbe }    from '../hooks/useP2PProbe'
 import { useWebRTC, postSignal } from '../hooks/useWebRTC'
 
 const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL as string
@@ -54,9 +53,6 @@ interface Props {
 }
 
 export default function ParentMonitor({ code, onBack, onSessionEnd }: Props) {
-  // P2P probe runs at top level — passed down to ParentRoom inside LiveKit context
-  const probeStatus = useP2PProbe(code, 'parent')
-
   // intentionalSwitchRef prevents LiveKit onDisconnected → onBack() during P2P crossfade
   const intentionalSwitchRef = useRef(false)
 
@@ -69,7 +65,6 @@ export default function ParentMonitor({ code, onBack, onSessionEnd }: Props) {
       code={code}
       onBack={onBack}
       onSessionEnd={onSessionEnd}
-      probeStatus={probeStatus}
       intentionalSwitchRef={intentionalSwitchRef}
       onDisconnected={handleDisconnected}
     />
@@ -78,13 +73,12 @@ export default function ParentMonitor({ code, onBack, onSessionEnd }: Props) {
 
 // ── LiveKit wrapper ───────────────────────────────────────────────────────
 interface InnerProps extends Omit<Props, 'transport'> {
-  probeStatus:         'checking' | 'available' | 'unavailable'
   intentionalSwitchRef: React.MutableRefObject<boolean>
   onDisconnected:      () => void
 }
 
 function LiveKitParentMonitor({
-  code, onBack, onSessionEnd, probeStatus, intentionalSwitchRef, onDisconnected,
+  code, onBack, onSessionEnd, intentionalSwitchRef, onDisconnected,
 }: InnerProps) {
   const tokenState = useToken(code, 'parent')
 
@@ -123,7 +117,6 @@ function LiveKitParentMonitor({
         code={code}
         onBack={onBack}
         onSessionEnd={onSessionEnd}
-        probeStatus={probeStatus}
         intentionalSwitchRef={intentionalSwitchRef}
       />
     </LiveKitRoom>
@@ -135,26 +128,34 @@ function ParentRoom({
   code,
   onBack,
   onSessionEnd,
-  probeStatus,
   intentionalSwitchRef,
 }: {
   code: string
   onBack: () => void
   onSessionEnd: (data: SessionData, stats: SessionStats) => void
-  probeStatus: 'checking' | 'available' | 'unavailable'
   intentionalSwitchRef: React.MutableRefObject<boolean>
 }) {
   const connectionState    = useConnectionState()
   const remoteParticipants = useRemoteParticipants()
   const { localParticipant } = useLocalParticipant()
+  const room = useRoomContext()
   const hasBaby = remoteParticipants.length > 0
 
   const videoTracks = useTracks([Track.Source.Camera],     { onlySubscribed: true })
   const audioTracks = useTracks([Track.Source.Microphone], { onlySubscribed: true })
   const videoRef = videoTracks.find(t => isTrackReference(t))
-  const audioRef = audioTracks.find(t => isTrackReference(t))
+  const audioRef = audioTracks.find(t => isTrackReference(t) && !t.participant.isLocal)
 
-  // ── P2P background connection ─────────────────────────────────────────
+  // ── Unlock audio playback (browser autoplay policy) ───────────────────
+  // Without this, the baby's audio track won't play even after user interaction.
+  useEffect(() => {
+    if (!room) return
+    room.startAudio().catch(() => {})
+  }, [room])
+
+  // ── P2P background connection — starts immediately (no probe gate) ────
+  // Previously gated on probe.status === 'available', which caused failures
+  // when probe timed out on same-WiFi / same-machine scenarios.
   const {
     status:       p2pStatus,
     transport:    p2pTransport,
@@ -163,7 +164,7 @@ function ParentRoom({
     code,
     role:        'parent',
     localStream: null,
-    enabled:     probeStatus === 'available',
+    enabled:     true,  // always try P2P; switch only fires if it actually connects
   })
 
   // P2P video element
@@ -177,8 +178,6 @@ function ParentRoom({
       p2pVideoRef.current.srcObject = p2pRemoteStream
     }
   }, [p2pRemoteStream])
-
-  const room = useRoomContext()
 
   // Core switch logic — called by onCanPlay OR by the p2pStatus fallback below
   const doSwitch = useCallback(async () => {
@@ -303,7 +302,7 @@ function ParentRoom({
   // ── Connection disruption summary ─────────────────────────────────────
   const { summary, clearSummary } = useConnectionLog(monitorState, audioStats)
 
-  // ── Talk-to-baby ──────────────────────────────────────────────────────
+  // ── Talk-to-baby (LiveKit mode only) ──────────────────────────────────
   const [isSpeaking, setIsSpeaking] = useState(false)
 
   const toggleSpeak = useCallback(async () => {
@@ -427,6 +426,13 @@ function ParentRoom({
                 className="analyse-btn"
                 onClick={(e) => { e.stopPropagation(); setShowDashboard(true) }}
               >
+                {/* Bar-chart icon */}
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                  stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="20" x2="18" y2="10"/>
+                  <line x1="12" y1="20" x2="12" y2="4"/>
+                  <line x1="6"  y1="20" x2="6"  y2="14"/>
+                </svg>
                 Analyse
               </button>
               {/* Speak button only available in LiveKit mode (P2P audio is one-way for now) */}
@@ -453,7 +459,17 @@ function ParentRoom({
         {summary && <SummaryBanner summary={summary} onDismiss={clearSummary} />}
         <HelpButton screen="monitor" />
 
-        {/* Degraded banner (LiveKit only — in P2P mode video is direct) */}
+        {/* ── Connection state banners ──────────────────────────────────── */}
+
+        {/* Reconnecting — pulsing non-intrusive banner */}
+        {!p2pActive && monitorState === 'reconnecting' && (
+          <div className="reconnecting-banner">
+            <span className="reconnecting-dot" />
+            Verbindung wird wiederhergestellt…
+          </div>
+        )}
+
+        {/* Degraded (LiveKit only — in P2P mode video is direct) */}
         {!p2pActive && monitorState === 'degraded' && (
           <div className="degraded-banner">
             🔊 Nur Audio — Video pausiert für stabile Verbindung
@@ -463,9 +479,17 @@ function ParentRoom({
         {/* Critical overlay (suppress when P2P is active — LK disconnect is intentional) */}
         {!p2pActive && monitorState === 'critical' && (
           <div className="critical-overlay">
-            <p className="critical-title">Verbindung getrennt</p>
+            <div className="critical-icon">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="12"/>
+                <line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+            </div>
+            <p className="critical-title">Verbindung unterbrochen</p>
             <p className="critical-subtitle">
-              Die Verbindung zum Baby-Gerät wurde unterbrochen.
+              Die Verbindung zum Baby-Gerät wurde getrennt.
             </p>
             <button
               className="primary-button"
@@ -487,6 +511,14 @@ function ParentRoom({
         {/* P2P critical overlay (only if P2P connection fails after switch) */}
         {p2pActive && p2pMonitorState === 'critical' && (
           <div className="critical-overlay">
+            <div className="critical-icon">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="12"/>
+                <line x1="12" y1="16" x2="12.01" y2="16"/>
+              </svg>
+            </div>
             <p className="critical-title">Direktverbindung getrennt</p>
             <p className="critical-subtitle">
               Die direkte Verbindung wurde unterbrochen.

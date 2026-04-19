@@ -8,10 +8,11 @@ interface Props {
 
 export default function ParentJoin({ onJoin, onBack }: Props) {
   const [code, setCode] = useState('')
-  // 8-char alphanumeric (lowercase letters + digits)
+  // 8-char alphanumeric (lowercase letters + digits, no confusable chars)
   const isValid = /^[a-z0-9]{8}$/.test(code)
 
   const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Strip spaces, uppercase → lowercase, keep only a-z0-9, max 8 chars
     setCode(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 8))
   }
 
@@ -32,17 +33,19 @@ export default function ParentJoin({ onJoin, onBack }: Props) {
       <div className="join-content">
         <h2 className="join-title">Verbindungscode eingeben</h2>
         <p className="join-subtitle">
-          Öffne die App auf dem Baby-Gerät und gib den 6-stelligen Code ein, der dort angezeigt wird.
+          Öffne die App auf dem Baby-Gerät und gib den 8-stelligen Code ein, der dort angezeigt wird.
         </p>
 
         <form className="join-form" onSubmit={handleSubmit}>
           <input
             className="code-input"
-            type="tel"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            maxLength={6}
-            placeholder="000000"
+            type="text"
+            inputMode="text"
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            maxLength={8}
+            placeholder="abcd 1234"
             value={code}
             onChange={handleInput}
             autoFocus

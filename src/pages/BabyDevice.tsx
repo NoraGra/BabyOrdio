@@ -2,14 +2,12 @@
  * BabyDevice — Baby-side streaming
  *
  * Architecture:
- * 1. Camera is acquired ONCE at top level (getUserMedia)
- * 2. In LiveKit mode: stream is published manually to LiveKit room
- *    + background P2P runs with the same stream (probe → full connection)
+ * 1. Camera + mic acquired ONCE at top level (getUserMedia)
+ * 2. In LiveKit mode: stream published manually to LiveKit room
+ *    + background P2P runs with the same stream (starts immediately)
  * 3. When parent auto-triggers P2P upgrade: mode switches to 'p2p'
  *    → BabyDeviceP2P receives the pre-acquired stream (no camera flash)
  * 4. Switch back to LiveKit: new LiveKit session (camera re-acquired)
- *
- * This ensures the camera NEVER turns off during a LiveKit → P2P switch.
  */
 import { useEffect, useState, useCallback, useRef } from 'react'
 import {
@@ -19,17 +17,15 @@ import {
   useRoomContext,
   useTracks,
   useParticipants,
-  VideoTrack,
   AudioTrack,
   isTrackReference,
 } from '@livekit/components-react'
-import { ConnectionQuality, RoomEvent, Track, LocalVideoTrack, LocalAudioTrack } from 'livekit-client'
+import { RoomEvent, Track, LocalVideoTrack, LocalAudioTrack } from 'livekit-client'
 import type { Participant } from 'livekit-client'
 import { QRCodeSVG } from 'qrcode.react'
 import { useToken } from '../hooks/useToken'
 import { useWakeLock } from '../hooks/useWakeLock'
 import { useWebRTC } from '../hooks/useWebRTC'
-import { useP2PProbe } from '../hooks/useP2PProbe'
 import ConnectionBadge from '../components/ConnectionBadge'
 import ModeBadge from '../components/ModeBadge'
 import HelpButton from '../components/HelpButton'
@@ -44,14 +40,14 @@ interface Props {
 }
 
 export default function BabyDevice({ code, onBack }: Props) {
-  const [mode,        setMode]        = useState<'p2p' | 'livekit'>('livekit')
-  const [camStream,   setCamStream]   = useState<MediaStream | null>(null)
-  const [camError,    setCamError]    = useState<string | null>(null)
+  const [mode,       setMode]       = useState<'p2p' | 'livekit'>('livekit')
+  const [camStream,  setCamStream]  = useState<MediaStream | null>(null)
+  const [camError,   setCamError]   = useState<string | null>(null)
 
   // Ref prevents onDisconnected → onBack() when WE initiate the LiveKit disconnect
   const isIntentionalSwitchRef = useRef(false)
 
-  // ── Acquire camera ONCE — shared between LiveKit and P2P ──────────────
+  // ── Acquire camera + mic ONCE — shared between LiveKit and P2P ────────
   useEffect(() => {
     let alive = true
     navigator.mediaDevices.getUserMedia({
@@ -60,20 +56,15 @@ export default function BabyDevice({ code, onBack }: Props) {
     })
       .then(s  => { if (alive) setCamStream(s) })
       .catch(e => { if (alive) setCamError(e.message) })
-
     return () => { alive = false }
   }, [])
 
-  // Stop camera tracks on full unmount only
+  // Stop all tracks on full unmount
   const camStreamRef = useRef(camStream)
   useEffect(() => { camStreamRef.current = camStream }, [camStream])
   useEffect(() => () => { camStreamRef.current?.getTracks().forEach(t => t.stop()) }, [])
 
-  // ── P2P probe (data-channel-only ICE test) ────────────────────────────
-  const probeStatus = useP2PProbe(code, 'baby')
-
-  // ── Background P2P media connection ───────────────────────────────────
-  // Stays enabled even in p2p mode so the parent's stream is never interrupted.
+  // ── Background P2P — starts immediately (same as parent side) ────────
   // BabyDeviceP2P receives this connection as a handoff (no re-negotiation).
   const {
     status:     p2pStatus,
@@ -83,9 +74,8 @@ export default function BabyDevice({ code, onBack }: Props) {
     code,
     role:        'baby',
     localStream: camStream,
-    enabled:     probeStatus === 'available' && !!camStream,
+    enabled:     !!camStream,   // start as soon as camera is ready
     onModeSwitch: () => {
-      // Parent requested switch back to LiveKit
       isIntentionalSwitchRef.current = false
       setMode('livekit')
     },
@@ -101,7 +91,6 @@ export default function BabyDevice({ code, onBack }: Props) {
         if (!r.ok || !alive) return
         const s = await r.json()
         if (alive && s.upgradeRequest === 'p2p') {
-          // Mark as intentional so LiveKit onDisconnected doesn't call onBack()
           isIntentionalSwitchRef.current = true
           setMode('p2p')
         }
@@ -136,7 +125,6 @@ export default function BabyDevice({ code, onBack }: Props) {
   }
 
   // P2P mode — hand off the pre-acquired stream and existing P2P connection
-  // so there's no camera flash and no stream re-negotiation
   if (mode === 'p2p') {
     return (
       <BabyDeviceP2P
@@ -162,7 +150,6 @@ export default function BabyDevice({ code, onBack }: Props) {
       code={code}
       onBack={handleDisconnected}
       camStream={camStream}
-      probeStatus={probeStatus}
       p2pStatus={p2pStatus}
     />
   )
@@ -170,14 +157,13 @@ export default function BabyDevice({ code, onBack }: Props) {
 
 // ── LiveKit baby device ───────────────────────────────────────────────────
 interface LiveKitProps {
-  code:        string
-  onBack:      () => void
-  camStream:   MediaStream
-  probeStatus: 'checking' | 'available' | 'unavailable'
-  p2pStatus:   string
+  code:       string
+  onBack:     () => void
+  camStream:  MediaStream
+  p2pStatus:  string
 }
 
-function LiveKitBabyDevice({ code, onBack, camStream, probeStatus, p2pStatus }: LiveKitProps) {
+function LiveKitBabyDevice({ code, onBack, camStream, p2pStatus }: LiveKitProps) {
   const tokenState = useToken(code, 'baby')
 
   if (!LIVEKIT_URL) return (
@@ -211,7 +197,6 @@ function LiveKitBabyDevice({ code, onBack, camStream, probeStatus, p2pStatus }: 
         code={code}
         onBack={onBack}
         camStream={camStream}
-        probeStatus={probeStatus}
         p2pStatus={p2pStatus}
       />
     </LiveKitRoom>
@@ -219,7 +204,7 @@ function LiveKitBabyDevice({ code, onBack, camStream, probeStatus, p2pStatus }: 
 }
 
 // ── BabyRoom (inside LiveKit context) ────────────────────────────────────
-function BabyRoom({ code, onBack, camStream, probeStatus, p2pStatus }: LiveKitProps) {
+function BabyRoom({ code, onBack, camStream, p2pStatus }: LiveKitProps) {
   const room                  = useRoomContext()
   const { localParticipant }  = useLocalParticipant()
   const connectionState       = useConnectionState()
@@ -233,24 +218,34 @@ function BabyRoom({ code, onBack, camStream, probeStatus, p2pStatus }: LiveKitPr
   const [isSwitchingCam,   setIsSwitchingCam]  = useState(false)
   const videoRef = useRef<HTMLVideoElement>(null)
 
+  // Keep a ref to the currently published video track so we can unpublish on flip
+  const publishedVideoTrackRef = useRef<MediaStreamTrack | null>(null)
+
   useWakeLock()
 
-  // ── Publish pre-acquired stream to LiveKit (instead of auto-acquire) ──
+  // ── Publish pre-acquired stream to LiveKit ────────────────────────────
   useEffect(() => {
     if (!localParticipant || !camStream) return
 
     const videoTrack = camStream.getVideoTracks()[0]
     const audioTrack = camStream.getAudioTracks()[0]
 
-    const lkVideo = videoTrack ? new LocalVideoTrack(videoTrack, undefined, false) : null
-    const lkAudio = audioTrack ? new LocalAudioTrack(audioTrack, undefined, false) : null
+    // userProvidedTrack=true: LiveKit won't stop/restart these tracks
+    const lkVideo = videoTrack ? new LocalVideoTrack(videoTrack, undefined, true) : null
+    const lkAudio = audioTrack ? new LocalAudioTrack(audioTrack, undefined, true) : null
 
-    if (lkVideo) localParticipant.publishTrack(lkVideo, { source: Track.Source.Camera }).catch(console.error)
-    if (lkAudio) localParticipant.publishTrack(lkAudio, { source: Track.Source.Microphone }).catch(console.error)
+    if (lkVideo) {
+      publishedVideoTrackRef.current = videoTrack
+      localParticipant.publishTrack(lkVideo, { source: Track.Source.Camera }).catch(console.error)
+    }
+    if (lkAudio) {
+      localParticipant.publishTrack(lkAudio, { source: Track.Source.Microphone }).catch(console.error)
+    }
 
     return () => {
-      if (lkVideo) localParticipant.unpublishTrack(videoTrack).catch(() => {})
-      if (lkAudio) localParticipant.unpublishTrack(audioTrack).catch(() => {})
+      if (videoTrack) localParticipant.unpublishTrack(videoTrack).catch(() => {})
+      if (audioTrack) localParticipant.unpublishTrack(audioTrack).catch(() => {})
+      publishedVideoTrackRef.current = null
     }
   }, [localParticipant, camStream])
 
@@ -278,6 +273,9 @@ function BabyRoom({ code, onBack, camStream, probeStatus, p2pStatus }: LiveKitPr
   }, [room])
 
   // ── Flip camera ──────────────────────────────────────────────────────
+  // Correct approach: getUserMedia with new device → unpublish old track →
+  // publish new track → update preview. Does NOT use room.switchActiveDevice
+  // (that only works for LiveKit-managed tracks, not manually published ones).
   const flipCamera = useCallback(async () => {
     if (isSwitchingCam) return
     setIsSwitchingCam(true)
@@ -285,12 +283,38 @@ function BabyRoom({ code, onBack, camStream, probeStatus, p2pStatus }: LiveKitPr
       const devices = await navigator.mediaDevices.enumerateDevices()
       const cams    = devices.filter(d => d.kind === 'videoinput')
       if (cams.length < 2) return
+
       const currentId = camStream.getVideoTracks()[0]?.getSettings().deviceId
-      const next = cams.find(d => d.deviceId !== currentId) ?? cams[0]
-      await room.switchActiveDevice('videoinput', next.deviceId)
+      const nextCam   = cams.find(d => d.deviceId !== currentId) ?? cams[0]
+
+      // Acquire new video stream with the selected camera
+      const newVideoStream = await navigator.mediaDevices.getUserMedia({
+        video: { deviceId: { exact: nextCam.deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
+      })
+      const newVideoTrack = newVideoStream.getVideoTracks()[0]
+
+      // Unpublish old video track from LiveKit
+      const oldVideoTrack = publishedVideoTrackRef.current
+      if (oldVideoTrack) {
+        await localParticipant.unpublishTrack(oldVideoTrack).catch(() => {})
+        oldVideoTrack.stop()
+      }
+
+      // Publish new video track to LiveKit
+      const lkVideo = new LocalVideoTrack(newVideoTrack, undefined, true)
+      publishedVideoTrackRef.current = newVideoTrack
+      await localParticipant.publishTrack(lkVideo, { source: Track.Source.Camera })
+
+      // Update local preview with the new video track (keeping existing audio)
+      if (videoRef.current) {
+        const previewStream = new MediaStream([newVideoTrack, ...camStream.getAudioTracks()])
+        videoRef.current.srcObject = previewStream
+      }
+
     } catch (e) { console.error('Camera flip failed:', e) }
     finally { setIsSwitchingCam(false) }
-  }, [room, camStream, isSwitchingCam])
+  }, [localParticipant, camStream, isSwitchingCam])
 
   const connectedParents = allParticipants.filter(p => !p.isLocal && p.identity.startsWith('parent-'))
   const parentCount      = connectedParents.length
@@ -301,7 +325,7 @@ function BabyRoom({ code, onBack, camStream, probeStatus, p2pStatus }: LiveKitPr
     : connectionState === 'connected' ? 'connected'
     : 'connecting'
 
-  // Remote audio (parent speaks to baby)
+  // Remote audio (parent speaks to baby via LiveKit)
   const remoteTracks = useTracks([Track.Source.Microphone], { onlySubscribed: true })
   const parentAudio  = remoteTracks.find(t => isTrackReference(t) && !t.participant.isLocal)
 
@@ -314,7 +338,7 @@ function BabyRoom({ code, onBack, camStream, probeStatus, p2pStatus }: LiveKitPr
       {/* Camera preview from pre-acquired stream */}
       <video ref={videoRef} className="baby-preview" autoPlay playsInline muted />
 
-      {/* Parent audio */}
+      {/* Parent audio (speak-to-baby function) */}
       {parentAudio && isTrackReference(parentAudio) && <AudioTrack trackRef={parentAudio} />}
 
       {/* Night mode overlay */}
@@ -347,13 +371,13 @@ function BabyRoom({ code, onBack, camStream, probeStatus, p2pStatus }: LiveKitPr
             </span>
             <div className="baby-top-actions">
               <button className="flip-camera-btn" onClick={flipCamera} disabled={isSwitchingCam}>
+                {/* Camera outline icon */}
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
                   stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M1 4v6h6"/>
-                  <path d="M23 20v-6h-6"/>
-                  <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                  <circle cx="12" cy="13" r="4"/>
                 </svg>
-                Kamera drehen
+                {isSwitchingCam ? 'Wechsle…' : 'Kamera drehen'}
               </button>
               <button className="flip-camera-btn" onClick={() => setNightMode(true)}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none"

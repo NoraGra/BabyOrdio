@@ -40,14 +40,14 @@ const HELP_CONTENT: Record<HelpScreen, { heading: string; items: HelpItem[] }> =
     heading: 'Wie funktioniert Baby Ordio?',
     items: [
       { icon: ICONS.phone,  title: 'Baby-Gerät',      body: 'Platziere dieses Gerät im Zimmer deines Babys. Es überträgt Kamera und Mikrofon live.' },
-      { icon: ICONS.eye,    title: 'Eltern-Gerät',    body: 'Gib den Code vom Baby-Gerät ein und starte die Überwachung — funktioniert im WLAN und über das Internet.' },
-      { icon: ICONS.lock,   title: 'Kein Account nötig', body: 'Der 6-stellige Code ist der einzige Zugriffsschutz. Nichts wird gespeichert oder aufgezeichnet.' },
+      { icon: ICONS.eye,    title: 'Eltern-Gerät',    body: 'Gib den 8-stelligen Code vom Baby-Gerät ein und starte die Überwachung — funktioniert im WLAN und über das Internet.' },
+      { icon: ICONS.lock,   title: 'Kein Account nötig', body: 'Der 8-stellige Code ist der einzige Zugriffsschutz. Nichts wird gespeichert oder aufgezeichnet.' },
     ],
   },
   baby: {
     heading: 'Baby-Gerät',
     items: [
-      { icon: ICONS.share,  title: 'Code teilen',            body: 'Verschicke den Verbindungscode ans Eltern-Gerät — per Nachricht, AirDrop oder QR-Code.' },
+      { icon: ICONS.share,  title: 'Code teilen',            body: 'Verschicke den 8-stelligen Verbindungscode ans Eltern-Gerät — per Nachricht, AirDrop oder QR-Code.' },
       { icon: ICONS.screen, title: 'Bildschirm aktiv lassen', body: 'Wenn der Bildschirm ausgeht oder du die App verlässt, stoppt die Übertragung.' },
       { icon: ICONS.camera, title: 'Kamera wechseln',        body: 'Wechsle zwischen Front- und Rückkamera — z.B. für einen besseren Blickwinkel auf das Bett.' },
     ],
@@ -55,7 +55,7 @@ const HELP_CONTENT: Record<HelpScreen, { heading: string; items: HelpItem[] }> =
   join: {
     heading: 'Code eingeben',
     items: [
-      { icon: ICONS.hash, title: 'Wo finde ich den Code?', body: 'Der 6-stellige Code erscheint auf dem Bildschirm des Baby-Geräts, nachdem du dort "Baby-Gerät" gewählt hast.' },
+      { icon: ICONS.hash, title: 'Wo finde ich den Code?', body: 'Der 8-stellige Code erscheint auf dem Bildschirm des Baby-Geräts, nachdem du dort "Baby-Gerät" gewählt hast. Buchstaben und Zahlen.' },
       { icon: ICONS.bulb, title: 'Tipp: Code teilen',       body: 'Auf dem Baby-Gerät gibt es einen "Code teilen"-Button — damit kannst du den Code direkt per Nachricht verschicken.' },
     ],
   },

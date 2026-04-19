@@ -27,7 +27,6 @@ export default function Home({ onSelectBaby, onSelectParent, onViewAnalysis }: P
           <span className="home-logo-baby">baby</span>
           <span className="home-logo-ordio">ordio</span>
         </p>
-        <p className="home-tagline">Ganz nah bei deinem Baby –<br/>auch wenn du es gerade nicht bist.</p>
       </div>
 
       {/* Role cards */}
