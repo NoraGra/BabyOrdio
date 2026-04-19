@@ -54,10 +54,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         next = { ...state, answer: data as SignalState['answer'] }
         break
       case 'baby-ice':
-        next = { ...state, babyIce: [...state.babyIce, JSON.stringify(data)] }
+        // data can be a single candidate (legacy) or an array (batch mode).
+        // Batch mode replaces the array atomically — no race-condition overwrites.
+        next = Array.isArray(data)
+          ? { ...state, babyIce: (data as RTCIceCandidateInit[]).map(c => JSON.stringify(c)) }
+          : { ...state, babyIce: [...state.babyIce, JSON.stringify(data)] }
         break
       case 'parent-ice':
-        next = { ...state, parentIce: [...state.parentIce, JSON.stringify(data)] }
+        next = Array.isArray(data)
+          ? { ...state, parentIce: (data as RTCIceCandidateInit[]).map(c => JSON.stringify(c)) }
+          : { ...state, parentIce: [...state.parentIce, JSON.stringify(data)] }
         break
       case 'mode':
         next = { ...state, mode: data as 'p2p' | 'livekit' }

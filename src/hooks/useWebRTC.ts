@@ -4,12 +4,24 @@
  * Baby is the *offerer*; parent is the *answerer*.
  * Signaling runs via /api/signal (Vercel KV polling).
  * Media goes directly browser-to-browser, or through TURN as fallback.
+ *
+ * ICE strategy: collect ALL candidates locally, send as one atomic batch
+ * after gathering is complete (or after 3 s timeout). This avoids the KV
+ * race-condition where rapid individual writes overwrite each other.
  */
 import { useState, useEffect, useRef, useCallback } from 'react'
 
 // ── ICE server config ─────────────────────────────────────────────────────
 const ICE_SERVERS: RTCIceServer[] = [
-  { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
+  {
+    urls: [
+      'stun:stun.l.google.com:19302',
+      'stun:stun1.l.google.com:19302',
+      'stun:stun2.l.google.com:19302',
+      'stun:stun3.l.google.com:19302',
+    ],
+  },
+  { urls: 'stun:stun.cloudflare.com:3478' },
 ]
 // Optional TURN via env (set VITE_TURN_URL, VITE_TURN_USERNAME, VITE_TURN_CREDENTIAL)
 const turnUrl = import.meta.env.VITE_TURN_URL as string | undefined
@@ -51,6 +63,7 @@ interface Options {
 
 // ── Signal helpers ────────────────────────────────────────────────────────
 const POLL_MS = 600
+const LOG = (...args: unknown[]) => console.log('[P2P]', ...args)
 
 export async function postSignal(code: string, type: string, data: unknown) {
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -67,6 +80,7 @@ export async function postSignal(code: string, type: string, data: unknown) {
     }
     if (attempt < 2) await new Promise(r => setTimeout(r, 300 * (attempt + 1)))
   }
+  console.error(`[P2P] signal POST ${type} FAILED after 3 attempts`)
 }
 
 async function getSignal(code: string) {
@@ -120,6 +134,8 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
     if (!enabled) return
     if (role === 'baby' && !localStream) return
 
+    LOG(`starting as ${role}, code=${code}`)
+
     aliveRef.current          = true
     remoteDescSetRef.current  = false
     pendingCandidates.current = []
@@ -134,22 +150,28 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
     const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
     pcRef.current = pc
 
-    // ── Add local tracks (baby) / recv-only transceivers (parent) ────
+    // ── Add local tracks (baby only) ─────────────────────────────────
+    // Parent (answerer) intentionally adds NO transceivers here.
+    // Unified Plan (Chrome + Safari/iOS) creates recvonly transceivers
+    // automatically when setRemoteDescription(offer) is called.
+    // Adding explicit recvonly transceivers BEFORE the offer breaks
+    // Safari/iOS WebKit because the pre-created MIDs don't match the
+    // offer's m-lines, causing SDP negotiation failure.
     if (localStream) {
+      LOG('adding local tracks:', localStream.getTracks().map(t => t.kind))
       localStream.getTracks().forEach(track => pc.addTrack(track, localStream))
-    } else if (role === 'parent') {
-      // Explicit recvonly transceivers help Chrome negotiate correctly
-      // when the answerer (parent) has no local tracks to send.
-      pc.addTransceiver('video', { direction: 'recvonly' })
-      pc.addTransceiver('audio', { direction: 'recvonly' })
     }
 
     // ── Receive remote tracks ─────────────────────────────────────────
     // NOTE: ev.streams[0] can be undefined in Unified Plan (modern Chrome/Firefox).
     // Always add ev.track directly as the reliable fallback path.
     pc.ontrack = (ev) => {
+      LOG('ontrack:', ev.track.kind, 'streams:', ev.streams.length)
       const addIfMissing = (t: MediaStreamTrack) => {
-        if (!stream.getTracks().includes(t)) stream.addTrack(t)
+        if (!stream.getTracks().includes(t)) {
+          stream.addTrack(t)
+          LOG('added track to remoteStream:', t.kind)
+        }
       }
       if (ev.streams.length > 0) {
         ev.streams[0].getTracks().forEach(addIfMissing)
@@ -161,6 +183,7 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
     // ── ICE state machine ─────────────────────────────────────────────
     pc.oniceconnectionstatechange = () => {
       if (!aliveRef.current) return
+      LOG('ICE state:', pc.iceConnectionState)
       switch (pc.iceConnectionState) {
         case 'checking':    setStatus('connecting');   break
         case 'connected':
@@ -169,24 +192,60 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
           pc.getStats().then(stats => {
             stats.forEach(report => {
               if (report.type === 'candidate-pair' && (report as any).state === 'succeeded') {
-                setTransport((report as any).localCandidateType === 'relay' ? 'relay' : 'direct')
+                const t = (report as any).localCandidateType === 'relay' ? 'relay' : 'direct'
+                LOG('transport:', t)
+                setTransport(t)
               }
             })
           })
           break
         case 'disconnected': setStatus('reconnecting'); break
-        case 'failed':       setStatus('failed');       break
+        case 'failed':
+          LOG('ICE FAILED — no connection established')
+          setStatus('failed')
+          break
         case 'closed':       if (aliveRef.current) setStatus('closed'); break
       }
     }
 
-    // ── Send our ICE candidates via signal ───────────────────────────
+    pc.onicegatheringstatechange = () => {
+      LOG('ICE gathering state:', pc.iceGatheringState)
+    }
+
+    pc.onsignalingstatechange = () => {
+      LOG('signaling state:', pc.signalingState)
+    }
+
+    // ── Batch ICE sending ─────────────────────────────────────────────
+    // Collect all candidates locally, then send as ONE atomic KV write
+    // once gathering is done. Prevents race-condition overwrites in KV.
+    const gatheredCandidates: RTCIceCandidateInit[] = []
+    let gatheringTimer: ReturnType<typeof setTimeout> | null = null
+
+    const sendIceBatch = () => {
+      if (gatheredCandidates.length === 0) return
+      LOG(`sending ICE batch (${gatheredCandidates.length} candidates) as ${role}`)
+      postSignal(code, `${role}-ice`, gatheredCandidates)
+    }
+
     pc.onicecandidate = (ev) => {
-      if (ev.candidate) postSignal(code, `${role}-ice`, ev.candidate.toJSON())
+      if (ev.candidate) {
+        LOG('gathered ICE candidate:', ev.candidate.type, ev.candidate.address ?? '?')
+        gatheredCandidates.push(ev.candidate.toJSON())
+        // Safety-valve: send after 3 s of no new candidates (in case null never fires)
+        if (gatheringTimer) clearTimeout(gatheringTimer)
+        gatheringTimer = setTimeout(sendIceBatch, 3000)
+      } else {
+        // null = end of gathering
+        LOG('ICE gathering complete')
+        if (gatheringTimer) clearTimeout(gatheringTimer)
+        sendIceBatch()
+      }
     }
 
     // ── Buffer ICE candidates until remote desc is ready ─────────────
     const applyPending = async () => {
+      LOG(`applying ${pendingCandidates.current.length} buffered ICE candidates`)
       for (const c of pendingCandidates.current) {
         try { await pc.addIceCandidate(new RTCIceCandidate(c)) } catch { /* ignore */ }
       }
@@ -200,27 +259,29 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
       if (!s || !aliveRef.current) return
 
       // Baby: detect mode switch requested by parent.
-      // Safe because baby awaits reset before polling starts,
-      // so 'livekit' can only come from the current parent session.
       if (role === 'baby' && s.mode === 'livekit' && onModeSwitchRef.current) {
+        LOG('parent requested LiveKit switch')
         onModeSwitchRef.current('livekit')
         return
       }
 
       // Parent: receive offer → create answer
       if (role === 'parent' && s.offer && !remoteDescSetRef.current) {
+        LOG('received offer, creating answer')
         try {
           await pc.setRemoteDescription(new RTCSessionDescription(s.offer))
           remoteDescSetRef.current = true
           await applyPending()
           const answer = await pc.createAnswer()
           await pc.setLocalDescription(answer)
+          LOG('posting answer')
           await postSignal(code, 'answer', { type: answer.type, sdp: answer.sdp })
         } catch (e) { console.error('[P2P] answer error', e) }
       }
 
       // Baby: receive answer
       if (role === 'baby' && s.answer && !remoteDescSetRef.current) {
+        LOG('received answer')
         try {
           await pc.setRemoteDescription(new RTCSessionDescription(s.answer))
           remoteDescSetRef.current = true
@@ -229,9 +290,13 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
       }
 
       // Apply new ICE candidates from the other side
+      // With batch ICE, all candidates arrive at once (array replaces previous)
       const theirIce: string[] = role === 'baby' ? (s.parentIce ?? []) : (s.babyIce ?? [])
       const myIdx = role === 'baby' ? parentIceIdxRef.current : babyIceIdxRef.current
       const newCandidates = theirIce.slice(myIdx)
+      if (newCandidates.length > 0) {
+        LOG(`applying ${newCandidates.length} new ICE candidates from other side`)
+      }
       for (const raw of newCandidates) {
         const c: RTCIceCandidateInit = JSON.parse(raw)
         if (remoteDescSetRef.current) {
@@ -245,30 +310,33 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
     }
 
     // ── Start: reset KV (baby), then create offer + begin polling ────
-    // Awaiting reset ensures stale mode='livekit' from last session is
-    // cleared before first poll fires — prevents false mode-switch trigger.
     ;(async () => {
       if (role === 'baby') {
+        LOG('resetting KV and creating offer')
         await postSignal(code, 'reset', null)
-        if (!aliveRef.current) return  // unmounted during reset
+        if (!aliveRef.current) return
         pc.createOffer()
           .then(async offer => {
             await pc.setLocalDescription(offer)
+            LOG('offer created, posting to KV')
             await postSignal(code, 'offer', { type: offer.type, sdp: offer.sdp })
           })
           .catch(e => console.error('[P2P] offer error', e))
       }
       if (!aliveRef.current) return
+      LOG('starting poll loop')
       pollRef.current = setInterval(poll, POLL_MS)
       poll()
     })()
 
     return () => {
+      LOG(`cleanup (${role})`)
       aliveRef.current = false
+      if (gatheringTimer) clearTimeout(gatheringTimer)
       stopPolling()
       pc.close()
     }
-  }, [code, role, localStream, enabled, stopPolling])
+  }, [code, role, localStream, enabled, stopPolling])  // eslint-disable-line react-hooks/exhaustive-deps
 
   return { status, transport, remoteStream, disconnect, replaceVideoTrack }
 }
