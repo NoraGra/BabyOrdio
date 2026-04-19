@@ -191,12 +191,27 @@ function ParentRoom({
     }
   }, [p2pRemoteStream])
 
-  // Core switch logic — called by onCanPlay OR by the p2pStatus fallback below
+  // Core switch logic — called by onPlaying OR by the p2pStatus fallback below
   const doSwitch = useCallback(async () => {
     if (p2pSwitchedRef.current) return
     p2pSwitchedRef.current = true
     await postSignal(code, 'upgrade', 'p2p')  // signal baby
     setP2pActive(true)                         // start CSS crossfade
+
+    // iOS workaround: after the crossfade, null + re-set srcObject on the
+    // video element. This forces iOS WebKit to request a new keyframe and
+    // start rendering. Without this the video stays black until external
+    // stimulus (e.g. camera flip) triggers a new keyframe from the sender.
+    setTimeout(() => {
+      const el = p2pVideoRef.current
+      if (el && el.srcObject) {
+        const src = el.srcObject
+        el.srcObject = null
+        el.srcObject = src
+        el.play().catch(() => {})
+      }
+    }, 700)
+
     setTimeout(() => {
       intentionalSwitchRef.current = true
       room.disconnect()                        // drop LiveKit after fade
