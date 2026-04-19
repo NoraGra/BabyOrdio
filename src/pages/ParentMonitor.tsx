@@ -167,20 +167,27 @@ function ParentRoom({
     enabled:     true,  // always try P2P; switch only fires if it actually connects
   })
 
-  // P2P video element
+  // P2P video + audio elements (separate — iOS requires muted video to autoplay)
   const p2pVideoRef    = useRef<HTMLVideoElement>(null)
+  const p2pAudioRef    = useRef<HTMLAudioElement>(null)
   const p2pSwitchedRef = useRef(false)
   const [p2pActive, setP2pActive] = useState(false)
 
-  // Attach P2P stream to video element.
-  // Called every time p2pRemoteStream changes reference (which happens on each
-  // ontrack event — new MediaStream is created each time). The explicit play()
-  // call is required on iOS Safari for WebRTC streams to start rendering.
+  // Attach P2P tracks to their respective elements whenever the remote stream updates.
+  // Video element is MUTED so iOS allows autoplay regardless of audio presence.
+  // Audio is routed to a separate <audio> element (same pattern as LiveKit).
   useEffect(() => {
-    if (!p2pVideoRef.current || !p2pRemoteStream) return
-    p2pVideoRef.current.srcObject = p2pRemoteStream
-    if (p2pRemoteStream.getTracks().length > 0) {
+    if (!p2pRemoteStream) return
+    const videoTracks = p2pRemoteStream.getVideoTracks()
+    const audioTracks = p2pRemoteStream.getAudioTracks()
+
+    if (p2pVideoRef.current && videoTracks.length > 0) {
+      p2pVideoRef.current.srcObject = new MediaStream(videoTracks)
       p2pVideoRef.current.play().catch(() => {})
+    }
+    if (p2pAudioRef.current && audioTracks.length > 0) {
+      p2pAudioRef.current.srcObject = new MediaStream(audioTracks)
+      p2pAudioRef.current.play().catch(() => {})
     }
   }, [p2pRemoteStream])
 
@@ -353,10 +360,14 @@ function ParentRoom({
     <>
       <div className="screen parent-screen">
 
-        {/* LiveKit audio — stop when P2P is active (P2P video plays its own audio) */}
+        {/* LiveKit audio — stop when P2P is active */}
         {audioRef && isTrackReference(audioRef) && !p2pActive && (
           <AudioTrack trackRef={audioRef} />
         )}
+
+        {/* P2P audio — separate element (muted video + audio element = iOS autoplay) */}
+        {/* Always rendered once P2P is active so audio doesn't cut out */}
+        <audio ref={p2pAudioRef} autoPlay style={{ display: 'none' }} />
 
         {/* ── Dual video layers — crossfade between LiveKit and P2P ──── */}
         <div className="video-container">
@@ -373,7 +384,8 @@ function ParentRoom({
             )}
           </div>
 
-          {/* P2P video layer — fades in when ready (always rendered once stream exists) */}
+          {/* P2P video layer — MUTED so iOS allows autoplay.
+              Audio is handled by the separate <audio> element above. */}
           {p2pRemoteStream && (
             <div
               className="video-layer"
@@ -384,7 +396,8 @@ function ParentRoom({
                 className="remote-video"
                 autoPlay
                 playsInline
-                onCanPlay={handleP2PCanPlay}
+                muted
+                onPlaying={handleP2PCanPlay}
               />
             </div>
           )}
