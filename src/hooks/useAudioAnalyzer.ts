@@ -80,6 +80,7 @@ export function useAudioAnalyzer(input: AudioInput) {
 
     try {
       ctx = new AudioContext()
+      ctx.resume().catch(() => {})   // wake up if browser started it suspended
       // Create a fresh MediaStream from the track so we don't disturb existing playback
       source = ctx.createMediaStreamSource(new MediaStream([mediaStreamTrack]))
       analyser = ctx.createAnalyser()

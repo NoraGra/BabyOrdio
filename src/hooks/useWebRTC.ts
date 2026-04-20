@@ -61,7 +61,7 @@ export interface WebRTCResult {
   transport:          WebRTCTransport
   remoteStream:       MediaStream | null
   disconnect:         () => void
-  replaceVideoTrack:  (track: MediaStreamTrack) => Promise<void>
+  replaceVideoTrack:  (track: MediaStreamTrack | null) => Promise<void>
   replaceAudioTrack:  (track: MediaStreamTrack) => Promise<void>
 }
 
@@ -143,19 +143,19 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
     setRemoteStream(null)
   }, [stopPolling])
 
-  const replaceVideoTrack = useCallback(async (newTrack: MediaStreamTrack) => {
+  const replaceVideoTrack = useCallback(async (newTrack: MediaStreamTrack | null) => {
     // Use stored ref first (survives sender.track becoming null after replaceTrack(null))
     const sender = videoSenderRef.current
       ?? pcRef.current?.getSenders().find(s => s.track?.kind === 'video')
     if (sender) {
-      LOG('replaceVideoTrack → sender found, replacing track', newTrack.id)
+      LOG('replaceVideoTrack → sender found, replacing track', newTrack?.id ?? 'null')
       await sender.replaceTrack(newTrack)
     } else {
       LOG('replaceVideoTrack → NO sender found!')
     }
   }, [])
 
-  const replaceAudioTrack = useCallback(async (newTrack: MediaStreamTrack) => {
+const replaceAudioTrack = useCallback(async (newTrack: MediaStreamTrack) => {
     // Use stored ref first (survives sender.track becoming null after replaceTrack(null))
     const sender = audioSenderRef.current
       ?? pcRef.current?.getSenders().find(s => s.track?.kind === 'audio')
@@ -202,6 +202,9 @@ export function useWebRTC({ code, role, localStream, enabled = true, onModeSwitc
         if (track.kind === 'audio') audioSenderRef.current = sender
         if (track.kind === 'video') videoSenderRef.current = sender
       })
+      // Baby (offerer): add a recvonly transceiver so parent can speak back.
+      // This creates an m-line in the offer; parent's answerer side sees it as
+      // sendonly → parent uses that sender to stream mic audio to baby.
     }
 
     // ── Receive remote tracks ─────────────────────────────────────────
