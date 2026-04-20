@@ -444,7 +444,7 @@ function BabyRoom({ code, onBack, camStream, p2pStatus }: LiveKitProps) {
                     }
                   }
                   try {
-                    await navigator.clipboard.writeText(`${formattedCode} — ${qrUrl}`)
+                    await navigator.clipboard.writeText(qrUrl)
                     setShareToast('Link kopiert ✓')
                     setTimeout(() => setShareToast(null), 2200)
                   } catch { /* ignore */ }

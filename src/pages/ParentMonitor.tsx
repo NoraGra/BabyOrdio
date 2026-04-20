@@ -191,39 +191,60 @@ function ParentRoom({
   // This avoids: AudioContext resume() issues, srcObject reassignment black frames,
   // and React muted-prop fighting with imperative el.muted = false.
 
-  const p2pAudioElRef  = useRef<HTMLAudioElement | null>(null)
+  const p2pAudioElRef    = useRef<HTMLAudioElement | null>(null)
+  const [audioBlocked, setAudioBlocked] = useState(false)
 
+  // ── Effect 1: create/destroy audio element when P2P becomes active ────
+  // Only depends on p2pActive — the element is NOT torn down when the
+  // remote stream changes (which would cause race conditions / silent failures).
   useEffect(() => {
-    if (!p2pActive || !p2pRemoteStream) return
-    const audioTracks = p2pRemoteStream.getAudioTracks()
-    console.log('[Audio] p2pActive+stream — audioTracks:', audioTracks.length,
-      audioTracks.map(t => `${t.id.slice(0,8)} state=${t.readyState} enabled=${t.enabled}`))
-    if (audioTracks.length === 0) return
-
+    if (!p2pActive) { setAudioBlocked(false); return }
     const audio = new Audio()
-    audio.srcObject = new MediaStream(audioTracks)
     audio.volume = 1
     p2pAudioElRef.current = audio
-
-    // Try immediately — works on desktop and after a prior user gesture on iOS.
-    // If blocked (iOS strict autoplay), resume on the very next tap — no button.
-    audio.play()
-      .then(() => console.log('[Audio] play() succeeded'))
-      .catch(() => {
-        console.warn('[Audio] play() blocked — resuming on next user interaction')
-        const resume = () => {
-          audio.play().catch(e => console.warn('[Audio] resume failed:', e))
-        }
-        document.addEventListener('touchend', resume, { capture: true, once: true })
-        document.addEventListener('click',    resume, { capture: true, once: true })
-      })
-
     return () => {
       audio.pause()
       try { audio.srcObject = null } catch {}
       p2pAudioElRef.current = null
+      setAudioBlocked(false)
     }
+  }, [p2pActive])
+
+  // ── Effect 2: update srcObject + play when stream changes ────────────
+  // Runs after Effect 1 (React guarantees order). Does NOT recreate the
+  // audio element — only updates what it plays. Safe to re-run on every
+  // p2pRemoteStream change.
+  useEffect(() => {
+    const audio = p2pAudioElRef.current
+    if (!audio || !p2pRemoteStream) return
+    const audioTracks = p2pRemoteStream.getAudioTracks()
+    console.log('[Audio] stream update — audioTracks:', audioTracks.length,
+      audioTracks.map(t => `${t.id.slice(0,8)} state=${t.readyState}`))
+    if (audioTracks.length === 0) return
+    audio.srcObject = new MediaStream(audioTracks)
+    audio.play()
+      .then(() => { console.log('[Audio] play() succeeded'); setAudioBlocked(false) })
+      .catch(() => { console.warn('[Audio] play() blocked'); setAudioBlocked(true) })
   }, [p2pActive, p2pRemoteStream])
+
+  // ── Effect 3: auto-resume when iOS blocks autoplay ───────────────────
+  // No visible button — the next user tap anywhere on the screen starts audio.
+  useEffect(() => {
+    if (!audioBlocked) return
+    const audio = p2pAudioElRef.current
+    if (!audio) return
+    const resume = () => {
+      audio.play()
+        .then(() => setAudioBlocked(false))
+        .catch(() => {})
+    }
+    document.addEventListener('touchend', resume, { capture: true, once: true })
+    document.addEventListener('click',    resume, { capture: true, once: true })
+    return () => {
+      document.removeEventListener('touchend', resume, true)
+      document.removeEventListener('click',    resume, true)
+    }
+  }, [audioBlocked])
 
   // When P2P stream arrives: put ONLY video tracks into the muted <video> element.
   // (Same as v45 — video is proven to work this way.)

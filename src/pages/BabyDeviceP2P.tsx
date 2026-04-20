@@ -217,7 +217,7 @@ export default function BabyDeviceP2P({
       }
     }
     try {
-      await navigator.clipboard.writeText(`${formattedCode} — ${qrUrl}`)
+      await navigator.clipboard.writeText(qrUrl)
       setShareToast('Link kopiert ✓')
       setTimeout(() => setShareToast(null), 2200)
     } catch { /* ignore */ }
