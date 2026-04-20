@@ -82,13 +82,6 @@ function LiveKitParentMonitor({
 }: InnerProps) {
   const tokenState = useToken(code, 'parent')
 
-  // Controlled connect prop — set to false for a clean disconnect that does NOT
-  // trigger auto-reconnect (unlike room.disconnect() while connect={true}).
-  const [lkConnectEnabled, setLkConnectEnabled] = useState(true)
-  const handleDisconnectLiveKit = useCallback(() => {
-    setLkConnectEnabled(false)
-  }, [])
-
   if (!LIVEKIT_URL) {
     return (
       <div className="screen error-screen">
@@ -115,7 +108,7 @@ function LiveKitParentMonitor({
     <LiveKitRoom
       serverUrl={LIVEKIT_URL}
       token={tokenState.token}
-      connect={lkConnectEnabled}
+      connect
       audio={false}
       video={false}
       onDisconnected={onDisconnected}
@@ -125,7 +118,6 @@ function LiveKitParentMonitor({
         onBack={onBack}
         onSessionEnd={onSessionEnd}
         intentionalSwitchRef={intentionalSwitchRef}
-        onDisconnectLiveKit={handleDisconnectLiveKit}
       />
     </LiveKitRoom>
   )
@@ -137,13 +129,11 @@ function ParentRoom({
   onBack,
   onSessionEnd,
   intentionalSwitchRef,
-  onDisconnectLiveKit,
 }: {
   code: string
   onBack: () => void
   onSessionEnd: (data: SessionData, stats: SessionStats) => void
   intentionalSwitchRef: React.MutableRefObject<boolean>
-  onDisconnectLiveKit: () => void
 }) {
   const connectionState    = useConnectionState()
   const remoteParticipants = useRemoteParticipants()
@@ -180,7 +170,7 @@ function ParentRoom({
   // P2P video element — muted so iOS allows autoplay without user gesture
   const p2pVideoRef    = useRef<HTMLVideoElement | null>(null)
   const p2pSwitchedRef = useRef(false)
-  const [p2pActive,    setP2pActive]    = useState(false)
+  const [p2pActive, setP2pActive] = useState(false)
   // p2pVideoEl tracks the video DOM element reactively (for analysis hooks)
   const [p2pVideoEl, setP2pVideoEl] = useState<HTMLVideoElement | null>(null)
   const p2pVideoCallbackRef = useCallback((el: HTMLVideoElement | null) => {
@@ -201,16 +191,14 @@ function ParentRoom({
   // This avoids: AudioContext resume() issues, srcObject reassignment black frames,
   // and React muted-prop fighting with imperative el.muted = false.
 
-  const p2pAudioElRef = useRef<HTMLAudioElement | null>(null)
+  const p2pAudioElRef  = useRef<HTMLAudioElement | null>(null)
   const [audioBlocked, setAudioBlocked] = useState(false)
 
-  // ── P2P audio (v50-proven structure) ─────────────────────────────────
-  // Creates audio element when P2P is active + stream has audio tracks.
-  // play() succeeds on desktop and Android. On iOS Safari it may be blocked
-  // by autoplay policy — in that case audioBlocked=true shows the tap button.
   useEffect(() => {
     if (!p2pActive || !p2pRemoteStream) return
     const audioTracks = p2pRemoteStream.getAudioTracks()
+    console.log('[Audio] p2pActive+stream — audioTracks:', audioTracks.length,
+      audioTracks.map(t => `${t.id.slice(0,8)} state=${t.readyState} enabled=${t.enabled}`))
     if (audioTracks.length === 0) return
 
     const audio = new Audio()
@@ -219,25 +207,21 @@ function ParentRoom({
     p2pAudioElRef.current = audio
 
     audio.play()
-      .then(() => setAudioBlocked(false))
-      .catch(() => setAudioBlocked(true))
+      .then(() => {
+        console.log('[Audio] play() succeeded')
+        setAudioBlocked(false)
+      })
+      .catch(e => {
+        console.warn('[Audio] play() blocked:', e)
+        setAudioBlocked(true)   // show tap-to-unmute button
+      })
 
     return () => {
       audio.pause()
       try { audio.srcObject = null } catch {}
       p2pAudioElRef.current = null
-      setAudioBlocked(false)
     }
   }, [p2pActive, p2pRemoteStream])
-
-  // Called when user taps the "Audio aktivieren" button (iOS autoplay workaround)
-  const handleUnblockAudio = useCallback(() => {
-    const audio = p2pAudioElRef.current
-    if (!audio) return
-    audio.play()
-      .then(() => setAudioBlocked(false))
-      .catch(() => {})
-  }, [])
 
   // When P2P stream arrives: put ONLY video tracks into the muted <video> element.
   // (Same as v45 — video is proven to work this way.)
@@ -255,8 +239,6 @@ function ParentRoom({
   const doSwitch = useCallback(async () => {
     if (p2pSwitchedRef.current) return
     p2pSwitchedRef.current = true
-    // Set early so any LiveKit events fired during the switch don't call onBack()
-    intentionalSwitchRef.current = true
     await postSignal(code, 'upgrade', 'p2p')  // signal baby
     setP2pActive(true)                         // start CSS crossfade
 
@@ -273,13 +255,11 @@ function ParentRoom({
       }
     }, 400)
 
-    // Drop LiveKit after the CSS fade completes.
-    // Use onDisconnectLiveKit (sets connect={false}) instead of room.disconnect()
-    // so LiveKit does NOT attempt to auto-reconnect after an intentional switch.
     setTimeout(() => {
-      onDisconnectLiveKit()
+      intentionalSwitchRef.current = true
+      room.disconnect()                        // drop LiveKit after fade
     }, 650)
-  }, [code, intentionalSwitchRef, onDisconnectLiveKit])
+  }, [code, room, intentionalSwitchRef])
 
   // Primary trigger: onCanPlay (cleanest — video is provably rendering)
   const handleP2PCanPlay = useCallback(() => doSwitch(), [doSwitch])
@@ -453,6 +433,7 @@ function ParentRoom({
           : 'null',
         'video':        vid ? (vid.paused ? '⏸ paused' : '▶ playing') + ` muted=${vid.muted}` : 'null',
         'audioEl':      aud ? (aud.paused ? '⏸ paused' : '▶ playing') + ` vol=${aud.volume}` : 'null',
+        'audioBlocked': String(audioBlocked),
         'tracks':       audioTracks.map(t =>
           `${t.readyState} en=${t.enabled} mu=${t.muted}`).join(' | ') || '–',
       })
@@ -481,10 +462,8 @@ function ParentRoom({
     <>
       <div className="screen parent-screen">
 
-        {/* LiveKit audio — let it unmount naturally when LiveKit disconnects
-            (audioRef becomes undefined). Do NOT gate on !p2pActive — unmounting
-            AudioTrack while the room is still connected can throw in LiveKit. */}
-        {audioRef && isTrackReference(audioRef) && (
+        {/* LiveKit audio — stop when P2P is active */}
+        {audioRef && isTrackReference(audioRef) && !p2pActive && (
           <AudioTrack trackRef={audioRef} />
         )}
 
@@ -506,8 +485,7 @@ function ParentRoom({
           </div>
 
           {/* P2P video layer — MUTED so iOS allows autoplay.
-              Audio is handled by the separate <audio> element above.
-              Video hidden when baby intentionally turned it off. */}
+              Audio is handled by the separate <audio> element above. */}
           {p2pRemoteStream && (
             <div
               className="video-layer"
@@ -520,8 +498,7 @@ function ParentRoom({
                 playsInline
                 muted
                 onPlaying={handleP2PCanPlay}
-                />
-
+              />
             </div>
           )}
         </div>
@@ -608,7 +585,7 @@ function ParentRoom({
                 </svg>
                 Analyse
               </button>
-              {/* Speak button — LiveKit mode only */}
+              {/* Speak button only available in LiveKit mode (P2P audio is one-way for now) */}
               {!p2pActive && (
                 <button
                   className={`speak-btn${isSpeaking ? ' speak-btn--active' : ''}`}
@@ -624,13 +601,18 @@ function ParentRoom({
                   {isSpeaking ? 'Mikrofon aktiv' : 'Sprechen'}
                 </button>
               )}
-              {/* Audio activate button — only shown when iOS blocks autoplay */}
+              {/* Tap-to-unmute fallback — shown when browser blocks audio autoplay (e.g. iOS) */}
               {p2pActive && audioBlocked && (
                 <button
                   className="speak-btn speak-btn--active"
-                  onClick={(e) => { e.stopPropagation(); handleUnblockAudio() }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    p2pAudioElRef.current?.play()
+                      .then(() => setAudioBlocked(false))
+                      .catch(() => {})
+                  }}
                 >
-                  🔊 Audio aktivieren
+                  🔇 Audio aktivieren
                 </button>
               )}
               {/* Demo mode — hidden */}
@@ -693,7 +675,6 @@ function ParentRoom({
             🔊 Nur Audio — Video pausiert für stabile Verbindung
           </div>
         )}
-
 
         {/* Critical overlay (suppress when P2P is active — LK disconnect is intentional) */}
         {!p2pActive && monitorState === 'critical' && (
