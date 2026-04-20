@@ -67,9 +67,9 @@ export default function BabyDevice({ code, onBack }: Props) {
   // ── Background P2P — starts immediately (same as parent side) ────────
   // BabyDeviceP2P receives this connection as a handoff (no re-negotiation).
   const {
-    status:           p2pStatus,
-    transport:        p2pTransport,
-    disconnect:       p2pDisconnect,
+    status:            p2pStatus,
+    transport:         p2pTransport,
+    disconnect:        p2pDisconnect,
     replaceVideoTrack: p2pReplaceVideoTrack,
     replaceAudioTrack: p2pReplaceAudioTrack,
   } = useWebRTC({

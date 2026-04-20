@@ -23,7 +23,7 @@ interface P2PHandoff {
   status:            WebRTCStatus
   transport:         WebRTCTransport
   disconnect:        () => void
-  replaceVideoTrack: (track: MediaStreamTrack) => Promise<void>
+  replaceVideoTrack: (track: MediaStreamTrack | null) => Promise<void>
   replaceAudioTrack: (track: MediaStreamTrack) => Promise<void>
 }
 
@@ -163,11 +163,12 @@ export default function BabyDeviceP2P({
     onModeSwitch: () => onSwitchToLiveKit(),
   })
 
-  const status             = p2pHandoff ? p2pHandoff.status             : ownWebRTC.status
-  const transport          = p2pHandoff ? p2pHandoff.transport          : ownWebRTC.transport
-  const disconnect         = p2pHandoff ? p2pHandoff.disconnect         : ownWebRTC.disconnect
-  const replaceVideoTrack  = p2pHandoff ? p2pHandoff.replaceVideoTrack  : ownWebRTC.replaceVideoTrack
-  const replaceAudioTrack  = p2pHandoff ? p2pHandoff.replaceAudioTrack  : ownWebRTC.replaceAudioTrack
+  const status            = p2pHandoff ? p2pHandoff.status            : ownWebRTC.status
+  const transport         = p2pHandoff ? p2pHandoff.transport         : ownWebRTC.transport
+  const disconnect        = p2pHandoff ? p2pHandoff.disconnect        : ownWebRTC.disconnect
+  const replaceVideoTrack = p2pHandoff ? p2pHandoff.replaceVideoTrack : ownWebRTC.replaceVideoTrack
+  const replaceAudioTrack = p2pHandoff ? p2pHandoff.replaceAudioTrack : ownWebRTC.replaceAudioTrack
+
 
   // ── Flip camera ─────────────────────────────────────────────────────────
   // Uses facingMode toggle — works on mobile Chrome where enumerateDevices()
