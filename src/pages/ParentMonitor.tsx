@@ -82,6 +82,13 @@ function LiveKitParentMonitor({
 }: InnerProps) {
   const tokenState = useToken(code, 'parent')
 
+  // Controlled connect prop — set to false for a clean disconnect that does NOT
+  // trigger auto-reconnect (unlike room.disconnect() while connect={true}).
+  const [lkConnectEnabled, setLkConnectEnabled] = useState(true)
+  const handleDisconnectLiveKit = useCallback(() => {
+    setLkConnectEnabled(false)
+  }, [])
+
   if (!LIVEKIT_URL) {
     return (
       <div className="screen error-screen">
@@ -108,7 +115,7 @@ function LiveKitParentMonitor({
     <LiveKitRoom
       serverUrl={LIVEKIT_URL}
       token={tokenState.token}
-      connect
+      connect={lkConnectEnabled}
       audio={false}
       video={false}
       onDisconnected={onDisconnected}
@@ -118,6 +125,7 @@ function LiveKitParentMonitor({
         onBack={onBack}
         onSessionEnd={onSessionEnd}
         intentionalSwitchRef={intentionalSwitchRef}
+        onDisconnectLiveKit={handleDisconnectLiveKit}
       />
     </LiveKitRoom>
   )
@@ -129,11 +137,13 @@ function ParentRoom({
   onBack,
   onSessionEnd,
   intentionalSwitchRef,
+  onDisconnectLiveKit,
 }: {
   code: string
   onBack: () => void
   onSessionEnd: (data: SessionData, stats: SessionStats) => void
   intentionalSwitchRef: React.MutableRefObject<boolean>
+  onDisconnectLiveKit: () => void
 }) {
   const connectionState    = useConnectionState()
   const remoteParticipants = useRemoteParticipants()
@@ -191,60 +201,45 @@ function ParentRoom({
   // This avoids: AudioContext resume() issues, srcObject reassignment black frames,
   // and React muted-prop fighting with imperative el.muted = false.
 
-  const p2pAudioElRef    = useRef<HTMLAudioElement | null>(null)
-  const [audioBlocked, setAudioBlocked] = useState(false)
+  const p2pAudioElRef = useRef<HTMLAudioElement | null>(null)
 
-  // ── Effect 1: create/destroy audio element when P2P becomes active ────
-  // Only depends on p2pActive — the element is NOT torn down when the
-  // remote stream changes (which would cause race conditions / silent failures).
+  // ── P2P audio — single effect, same structure as v50 (proven to work) ─
+  // Creates audio element, plays immediately. If iOS blocks autoplay the
+  // very next user tap anywhere on screen resumes it — no visible button.
   useEffect(() => {
-    if (!p2pActive) { setAudioBlocked(false); return }
+    if (!p2pActive || !p2pRemoteStream) return
+    const audioTracks = p2pRemoteStream.getAudioTracks()
+    console.log('[Audio] p2pActive+stream — audioTracks:', audioTracks.length,
+      audioTracks.map(t => `${t.id.slice(0,8)} state=${t.readyState} enabled=${t.enabled}`))
+    if (audioTracks.length === 0) return
+
     const audio = new Audio()
+    audio.srcObject = new MediaStream(audioTracks)
     audio.volume = 1
     p2pAudioElRef.current = audio
+
+    let removeListeners: (() => void) | null = null
+
+    audio.play()
+      .then(() => console.log('[Audio] play() succeeded'))
+      .catch(() => {
+        console.warn('[Audio] play() blocked — resuming on next user tap')
+        const resume = () => { audio.play().catch(() => {}) }
+        document.addEventListener('touchend', resume, { capture: true, once: true })
+        document.addEventListener('click',    resume, { capture: true, once: true })
+        removeListeners = () => {
+          document.removeEventListener('touchend', resume, true)
+          document.removeEventListener('click',    resume, true)
+        }
+      })
+
     return () => {
+      removeListeners?.()
       audio.pause()
       try { audio.srcObject = null } catch {}
       p2pAudioElRef.current = null
-      setAudioBlocked(false)
     }
-  }, [p2pActive])
-
-  // ── Effect 2: update srcObject + play when stream changes ────────────
-  // Runs after Effect 1 (React guarantees order). Does NOT recreate the
-  // audio element — only updates what it plays. Safe to re-run on every
-  // p2pRemoteStream change.
-  useEffect(() => {
-    const audio = p2pAudioElRef.current
-    if (!audio || !p2pRemoteStream) return
-    const audioTracks = p2pRemoteStream.getAudioTracks()
-    console.log('[Audio] stream update — audioTracks:', audioTracks.length,
-      audioTracks.map(t => `${t.id.slice(0,8)} state=${t.readyState}`))
-    if (audioTracks.length === 0) return
-    audio.srcObject = new MediaStream(audioTracks)
-    audio.play()
-      .then(() => { console.log('[Audio] play() succeeded'); setAudioBlocked(false) })
-      .catch(() => { console.warn('[Audio] play() blocked'); setAudioBlocked(true) })
   }, [p2pActive, p2pRemoteStream])
-
-  // ── Effect 3: auto-resume when iOS blocks autoplay ───────────────────
-  // No visible button — the next user tap anywhere on the screen starts audio.
-  useEffect(() => {
-    if (!audioBlocked) return
-    const audio = p2pAudioElRef.current
-    if (!audio) return
-    const resume = () => {
-      audio.play()
-        .then(() => setAudioBlocked(false))
-        .catch(() => {})
-    }
-    document.addEventListener('touchend', resume, { capture: true, once: true })
-    document.addEventListener('click',    resume, { capture: true, once: true })
-    return () => {
-      document.removeEventListener('touchend', resume, true)
-      document.removeEventListener('click',    resume, true)
-    }
-  }, [audioBlocked])
 
   // When P2P stream arrives: put ONLY video tracks into the muted <video> element.
   // (Same as v45 — video is proven to work this way.)
@@ -262,6 +257,8 @@ function ParentRoom({
   const doSwitch = useCallback(async () => {
     if (p2pSwitchedRef.current) return
     p2pSwitchedRef.current = true
+    // Set early so any LiveKit events fired during the switch don't call onBack()
+    intentionalSwitchRef.current = true
     await postSignal(code, 'upgrade', 'p2p')  // signal baby
     setP2pActive(true)                         // start CSS crossfade
 
@@ -278,11 +275,13 @@ function ParentRoom({
       }
     }, 400)
 
+    // Drop LiveKit after the CSS fade completes.
+    // Use onDisconnectLiveKit (sets connect={false}) instead of room.disconnect()
+    // so LiveKit does NOT attempt to auto-reconnect after an intentional switch.
     setTimeout(() => {
-      intentionalSwitchRef.current = true
-      room.disconnect()                        // drop LiveKit after fade
+      onDisconnectLiveKit()
     }, 650)
-  }, [code, room, intentionalSwitchRef])
+  }, [code, intentionalSwitchRef, onDisconnectLiveKit])
 
   // Primary trigger: onCanPlay (cleanest — video is provably rendering)
   const handleP2PCanPlay = useCallback(() => doSwitch(), [doSwitch])
@@ -484,8 +483,10 @@ function ParentRoom({
     <>
       <div className="screen parent-screen">
 
-        {/* LiveKit audio — stop when P2P is active */}
-        {audioRef && isTrackReference(audioRef) && !p2pActive && (
+        {/* LiveKit audio — let it unmount naturally when LiveKit disconnects
+            (audioRef becomes undefined). Do NOT gate on !p2pActive — unmounting
+            AudioTrack while the room is still connected can throw in LiveKit. */}
+        {audioRef && isTrackReference(audioRef) && (
           <AudioTrack trackRef={audioRef} />
         )}
 
